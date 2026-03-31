@@ -69,9 +69,15 @@ export default function LoginPage() {
       }
 
       localStorage.setItem('pos_employee_session', JSON.stringify(data));
+      // Cookie para el middleware (sin datos sensibles, solo señal de sesión)
+      document.cookie = `pos_session=1; path=/; max-age=${60 * 60 * 12}; SameSite=Strict`;
 
+      const params = new URLSearchParams(window.location.search);
+      const redirect = params.get('redirect');
       const role = data.role as string;
-      if (role === 'admin') router.push('/admin/dashboard');
+      if (redirect && redirect !== '/login') {
+        router.push(redirect);
+      } else if (role === 'admin') router.push('/admin/dashboard');
       else if (role === 'cajero') router.push('/cajero');
       else if (role === 'mesero') router.push('/mesero');
       else if (role === 'cocina') router.push('/cocina');

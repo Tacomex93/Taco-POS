@@ -252,7 +252,7 @@ export default function CocinaPage() {
           </button>
           <button
             type="button"
-            onClick={() => { localStorage.removeItem('pos_employee_session'); router.push('/login'); }}
+            onClick={() => { localStorage.removeItem('pos_employee_session'); document.cookie = 'pos_session=; path=/; max-age=0; SameSite=Strict'; router.push('/login'); }}
             className="h-9 w-9 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-400 hover:bg-red-900/50 hover:text-red-400 transition-colors"
           >
             <LogOut className="w-4 h-4" />
