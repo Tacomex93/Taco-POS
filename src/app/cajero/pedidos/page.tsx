@@ -25,9 +25,12 @@ import {
 import { cn } from "@/lib/utils";
 import { UserNav } from "@/components/UserNav";
 import { supabase } from "@/lib/supabase";
+import { Order } from "@/lib/types";
+
+type OrderWithEmployee = Order & { employees?: { full_name: string } | null };
 
 export default function PedidosCajeroPage() {
-  const [orders, setOrders] = useState<Record<string, unknown>[]>([]);
+  const [orders, setOrders] = useState<OrderWithEmployee[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
 
@@ -149,7 +152,7 @@ export default function PedidosCajeroPage() {
 
                            <div className="flex flex-col items-center lg:items-end gap-1">
                               <span className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.3em]">Total de Venta</span>
-                              <p className="text-4xl font-black text-zinc-900 dark:text-white tracking-tighter italic leading-none">${parseFloat(order.total).toLocaleString()}</p>
+                              <p className="text-4xl font-black text-zinc-900 dark:text-white tracking-tighter italic leading-none">${order.total.toLocaleString()}</p>
                               <p className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest pt-1">{order.comensales} Comensales</p>
                            </div>
 

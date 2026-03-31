@@ -4,8 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Delete, Lock, UserCheck, Loader2, AlertCircle } from "lucide-react";
+import { Delete, UserCheck, Loader2, AlertCircle, ChefHat } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function LoginPage() {
@@ -13,6 +12,7 @@ export default function LoginPage() {
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shake, setShake] = useState(false);
 
   const handleNumberClick = (num: string) => {
     if (pin.length < 4) {
@@ -23,6 +23,12 @@ export default function LoginPage() {
 
   const handleDelete = () => {
     setPin(prev => prev.slice(0, -1));
+    setError(null);
+  };
+
+  const triggerShake = () => {
+    setShake(true);
+    setTimeout(() => setShake(false), 500);
   };
 
   const verifyPin = async (finalPin: string) => {
@@ -40,14 +46,13 @@ export default function LoginPage() {
       if (fetchError || !data) {
         setError('PIN incorrecto. Inténtalo de nuevo.');
         setPin('');
+        triggerShake();
         setLoading(false);
         return;
       }
 
-      // Save session
       localStorage.setItem('pos_employee_session', JSON.stringify(data));
 
-      // Redirect by role
       const role = data.role as string;
       if (role === 'admin') router.push('/admin/dashboard');
       else if (role === 'cajero') router.push('/cajero');
@@ -56,98 +61,137 @@ export default function LoginPage() {
       else router.push('/');
 
     } catch {
-      setError('Error de conexión con el de servidor.');
+      setError('Error de conexión con el servidor.');
+      triggerShake();
       setLoading(false);
     }
   };
 
   const handleSubmit = () => {
     if (pin.length >= 4) verifyPin(pin);
-    else setError('El PIN debe tener al menos 4 dígitos.');
+    else {
+      setError('El PIN debe tener 4 dígitos.');
+      triggerShake();
+    }
   };
 
   return (
-    <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-6 relative overflow-hidden font-sans">
-      {/* Background Decor */}
-      <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
-         <div className="absolute -top-20 -left-20 w-96 h-96 bg-orange-600 rounded-full blur-[120px]"></div>
-         <div className="absolute -bottom-20 -right-20 w-96 h-96 bg-emerald-600 rounded-full blur-[120px]"></div>
+    <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center p-6 relative overflow-hidden">
+      {/* Ambient blobs */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-32 -left-32 w-[500px] h-[500px] bg-orange-600/20 rounded-full blur-[140px]" />
+        <div className="absolute -bottom-32 -right-32 w-[500px] h-[500px] bg-amber-500/10 rounded-full blur-[140px]" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-orange-900/10 rounded-full blur-[100px]" />
       </div>
 
-      <Card className="w-full max-w-[420px] bg-black/60 backdrop-blur-3xl border-white/5 shadow-[0_32px_120px_-15px_rgba(0,0,0,0.8)] rounded-[3rem] animate-slide-up relative z-10">
-        <CardHeader className="text-center p-10 pb-6 space-y-4">
-          <div className="mx-auto w-16 h-16 bg-zinc-900 rounded-[1.5rem] flex items-center justify-center border border-white/10 shadow-2xl">
-             <Lock className="w-8 h-8 text-orange-600" />
-          </div>
-          <div className="space-y-1">
-             <CardTitle className="text-3xl font-black text-white tracking-tighter uppercase italic">Control de Acceso</CardTitle>
-             <CardDescription className="text-zinc-500 font-bold text-xs uppercase tracking-widest leading-none pt-2">Taquería POS • Iniciar Sesión</CardDescription>
-          </div>
-        </CardHeader>
+      {/* Subtle grid */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-[0.03]"
+        style={{ backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }}
+      />
 
-        <CardContent className="p-10 pt-0 space-y-10">
-          <div className="space-y-6">
-             <div className="flex justify-center gap-6">
-                {[...Array(4)].map((_, i) => (
-                  <div 
-                    key={i} 
-                    className={cn(
-                      "w-4 h-4 rounded-full border-2 transition-all duration-300",
-                      pin.length > i ? "bg-orange-600 border-orange-600 scale-125 shadow-[0_0_15px_rgba(234,88,12,0.6)]" : "border-white/10"
-                    )}
-                  />
-                ))}
-             </div>
-             
-             {error ? (
-                <div className="flex items-center gap-2 justify-center text-red-500 bg-red-500/10 py-3 px-4 rounded-2xl animate-pulse">
-                   <AlertCircle className="w-4 h-4" />
-                   <span className="text-[10px] font-black uppercase tracking-widest">{error}</span>
-                </div>
-             ) : (
-                <p className="text-center text-zinc-600 text-[10px] font-black uppercase tracking-widest italic">Introduce tu código de empleado</p>
-             )}
+      <div className={cn("w-full max-w-[400px] relative z-10 transition-all", shake && "animate-[shake_0.4s_ease-in-out]")}>
+        {/* Logo / Brand */}
+        <div className="flex flex-col items-center mb-8 gap-3">
+          <div className="w-20 h-20 rounded-[2rem] bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center shadow-[0_0_60px_rgba(234,88,12,0.4)] border border-orange-400/20">
+            <ChefHat className="w-10 h-10 text-white" />
+          </div>
+          <div className="text-center">
+            <h1 className="text-2xl font-black text-white tracking-tighter uppercase italic leading-none">Taquería POS</h1>
+            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.3em] mt-1">Sistema de Punto de Venta</p>
+          </div>
+        </div>
+
+        {/* Card */}
+        <div className="bg-white/[0.04] backdrop-blur-2xl border border-white/[0.07] rounded-[2.5rem] p-8 shadow-[0_40px_100px_rgba(0,0,0,0.6)]">
+          {/* PIN dots */}
+          <div className="flex justify-center gap-5 mb-6">
+            {[...Array(4)].map((_, i) => (
+              <div
+                key={i}
+                className={cn(
+                  "w-5 h-5 rounded-full transition-all duration-200",
+                  pin.length > i
+                    ? "bg-orange-500 shadow-[0_0_16px_rgba(249,115,22,0.7)] scale-110"
+                    : "bg-white/10 border border-white/10"
+                )}
+              />
+            ))}
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          {/* Status message */}
+          <div className="h-8 flex items-center justify-center mb-6">
+            {error ? (
+              <div className="flex items-center gap-2 text-red-400 bg-red-500/10 border border-red-500/20 py-1.5 px-4 rounded-xl">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-widest">{error}</span>
+              </div>
+            ) : (
+              <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-[0.25em]">
+                {pin.length === 0 ? 'Ingresa tu PIN de empleado' : `${pin.length} de 4 dígitos`}
+              </p>
+            )}
+          </div>
+
+          {/* Numpad */}
+          <div className="grid grid-cols-3 gap-3">
             {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
-              <Button 
-                key={num} 
-                variant="ghost" 
+              <button
+                key={num}
                 onClick={() => handleNumberClick(num.toString())}
-                className="h-20 rounded-[2rem] bg-white/5 hover:bg-orange-600 hover:text-white text-white font-black text-2xl transition-all active:scale-90 border border-white/5 shadow-xl"
+                className="h-[72px] rounded-2xl bg-white/[0.06] hover:bg-orange-500/20 active:scale-95 active:bg-orange-500/30 text-white font-black text-2xl transition-all duration-150 border border-white/[0.06] hover:border-orange-500/30 shadow-sm select-none"
               >
                 {num}
-              </Button>
+              </button>
             ))}
-            <Button 
-               variant="ghost" 
-               onClick={handleDelete}
-               className="h-20 rounded-[2rem] bg-red-500/5 hover:bg-red-500 text-red-500 hover:text-white font-black text-2xl transition-all border border-red-500/10 shadow-xl"
+
+            {/* Delete */}
+            <button
+              onClick={handleDelete}
+              className="h-[72px] rounded-2xl bg-red-500/[0.08] hover:bg-red-500/20 active:scale-95 text-red-400 hover:text-red-300 font-black text-2xl transition-all duration-150 border border-red-500/10 hover:border-red-500/30 flex items-center justify-center select-none"
             >
-              <Delete className="w-8 h-8" />
-            </Button>
-            <Button 
-              variant="ghost" 
+              <Delete className="w-6 h-6" />
+            </button>
+
+            {/* 0 */}
+            <button
               onClick={() => handleNumberClick('0')}
-              className="h-20 rounded-[2rem] bg-white/5 hover:bg-orange-600 hover:text-white text-white font-black text-2xl transition-all active:scale-90 border border-white/5 shadow-xl"
+              className="h-[72px] rounded-2xl bg-white/[0.06] hover:bg-orange-500/20 active:scale-95 active:bg-orange-500/30 text-white font-black text-2xl transition-all duration-150 border border-white/[0.06] hover:border-orange-500/30 shadow-sm select-none"
             >
               0
-            </Button>
-            <Button 
+            </button>
+
+            {/* Enter */}
+            <Button
               disabled={loading || pin.length < 4}
               onClick={handleSubmit}
-              className="h-20 rounded-[2rem] bg-emerald-600 hover:bg-emerald-500 text-white font-black transition-all shadow-xl shadow-emerald-900/40 relative overflow-hidden"
+              className={cn(
+                "h-[72px] rounded-2xl font-black text-white transition-all duration-150 border-none shadow-lg select-none",
+                pin.length === 4 && !loading
+                  ? "bg-gradient-to-br from-orange-500 to-orange-700 hover:from-orange-400 hover:to-orange-600 shadow-[0_8px_30px_rgba(234,88,12,0.4)] active:scale-95"
+                  : "bg-white/[0.04] text-white/20 cursor-not-allowed"
+              )}
             >
-              {loading ? <Loader2 className="w-8 h-8 animate-spin" /> : <UserCheck className="w-8 h-8" />}
+              {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <UserCheck className="w-6 h-6" />}
             </Button>
           </div>
-        </CardContent>
-      </Card>
-      
-      <div className="absolute bottom-10 text-[10px] font-black text-zinc-700 uppercase tracking-[0.4em] italic leading-none text-center pointer-events-none">
-         Security System • 2026 • Encrypted PIN Access
+        </div>
+
+        {/* Footer */}
+        <p className="text-center text-[9px] font-bold text-zinc-700 uppercase tracking-[0.35em] mt-8">
+          Acceso Seguro • Cifrado • 2026
+        </p>
       </div>
+
+      <style jsx global>{`
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-8px); }
+          40% { transform: translateX(8px); }
+          60% { transform: translateX(-5px); }
+          80% { transform: translateX(5px); }
+        }
+      `}</style>
     </div>
   );
 }
