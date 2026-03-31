@@ -7,11 +7,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Minus, CreditCard, Banknote, Search, Users, Receipt, ShoppingCart, Loader2, CheckCircle2, SplitSquareHorizontal, ChevronDown, ArrowLeft } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Plus, Minus, CreditCard, Banknote, Search, Users, Receipt, ShoppingCart, Loader2, CheckCircle2, SplitSquareHorizontal, ChevronDown, ArrowLeft } from "lucide-react";import { cn } from "@/lib/utils";
 import { UserNav } from "@/components/UserNav";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { useOrdersRealtime } from "@/hooks/use-orders-realtime";
 
 type Product = { id: string; name: string; price: number; category: string | null; is_active: boolean; unit: string; size_variant: string | null; };
 type OrderItem = { productId: string; name: string; price: number; quantity: number; seat: number; sizeLabel?: string; };
@@ -51,6 +51,8 @@ export default function CashierPage() {
   const [cashReceived, setCashReceived] = useState('');
   const [paying, setPaying] = useState(false);
   const [paidSuccess, setPaidSuccess] = useState(false);
+  // Realtime: órdenes listas para cobrar notificadas desde cocina
+  const [readyAlert, setReadyAlert] = useState<{ tableId: string; orderId: string } | null>(null);
 
   useEffect(() => {
     const s = localStorage.getItem('pos_employee_session');
@@ -66,6 +68,25 @@ export default function CashierPage() {
   }, []);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
+
+  // Realtime: escucha cambios de cocina para alertar al cajero
+  useOrdersRealtime({
+    channelName: 'cajero-orders',
+    onchange: (event) => {
+      const row = event.new as Record<string, unknown>;
+      // Notificar cuando cocina marca una orden como lista
+      if (event.eventType === 'UPDATE' && row.kitchen_status === 'ready' && row.status === 'abierta') {
+        setReadyAlert({ tableId: String(row.table_id), orderId: String(row.id) });
+      }
+      // Limpiar alerta si la orden fue entregada o pagada
+      if (event.eventType === 'UPDATE' &&
+        (row.kitchen_status === 'delivered' || row.status === 'pagada')) {
+        setReadyAlert(prev => prev?.orderId === String(row.id) ? null : prev);
+      }
+    },
+    onRefresh: () => {}, // caja no necesita refrescar tabla completa
+    pollInterval: 30_000,
+  });
 
   // Persist table state to localStorage whenever it changes
   useEffect(() => {
@@ -198,6 +219,19 @@ export default function CashierPage() {
               <UserNav />
             </div>
           </header>
+
+          {/* ── Realtime alert: orden lista desde cocina ── */}
+          {readyAlert && (
+            <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-500 text-white text-[11px] font-black uppercase tracking-widest animate-pulse">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                Mesa {readyAlert.tableId} — orden lista para cobrar
+              </div>
+              <button onClick={() => setReadyAlert(null)} className="opacity-70 hover:opacity-100 transition-opacity">
+                ✕
+              </button>
+            </div>
+          )}
 
           {!selectedTable ? (
             /* ══════════════════════════════════════════

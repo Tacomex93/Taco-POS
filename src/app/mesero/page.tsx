@@ -1,259 +1,491 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Button, buttonVariants } from "@/components/ui/button";
+import React, { useState, useEffect, useCallback } from 'react';
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { 
-  Bell, 
-  ChefHat, 
-  MapPin, 
-  Users, 
-  Plus, 
-  Clock, 
-  LayoutGrid, 
-  ArrowLeft, 
-  Flame, 
-  CheckCircle2, 
+import {
+  Bell, ChefHat, Plus, Flame, CheckCircle2,
+  Loader2, Users, X, Minus, ShoppingBag, RefreshCw,
+  UtensilsCrossed, Wifi, WifiOff
 } from "lucide-react";
 import { UserNav } from "@/components/UserNav";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-import Link from "next/link";
+import { supabase } from "@/lib/supabase";
+import { Order, Product, TableStatus } from "@/lib/types";
+import { useOrdersRealtime } from "@/hooks/use-orders-realtime";
 
-type TableStatus = 'available' | 'occupied' | 'waiting' | 'ready';
-
-type Table = {
+// ─── Types ────────────────────────────────────────────────────────────────────
+type TableView = {
   id: number;
   status: TableStatus;
   diners: number;
-  lastOrderTime?: string;
+  order?: Order & { kitchen_status: string };
 };
 
-const INITIAL_TABLES: Table[] = [
-  { id: 1, status: 'occupied', diners: 4, lastOrderTime: '15:20' },
-  { id: 2, status: 'available', diners: 0 },
-  { id: 3, status: 'waiting', diners: 2, lastOrderTime: '15:45' },
-  { id: 4, status: 'ready', diners: 3, lastOrderTime: '15:30' },
-  { id: 5, status: 'available', diners: 0 },
-  { id: 6, status: 'occupied', diners: 6, lastOrderTime: '15:10' },
-  { id: 7, status: 'available', diners: 0 },
-  { id: 8, status: 'waiting', diners: 2, lastOrderTime: '16:00' },
-];
+type CartItem = { product: Product; qty: number; notes: string };
 
+const TABLE_COUNT = 12;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const statusMeta: Record<TableStatus, { label: string; color: string; dot: string }> = {
+  available: { label: 'Libre',     color: 'bg-emerald-500/10 text-emerald-600 border-emerald-200',  dot: 'bg-emerald-500' },
+  occupied:  { label: 'Ocupada',   color: 'bg-zinc-100 text-zinc-500 border-zinc-200',               dot: 'bg-zinc-400' },
+  waiting:   { label: 'Cocinando', color: 'bg-amber-500/10 text-amber-600 border-amber-200',         dot: 'bg-amber-500' },
+  ready:     { label: '¡Listo!',   color: 'bg-blue-500/10 text-blue-600 border-blue-200',            dot: 'bg-blue-500 animate-pulse' },
+};
+
+function kitchenLabel(s: string) {
+  return { pending: 'Pendiente', preparing: 'Cocinando', ready: '¡Listo!', delivered: 'Entregado' }[s] ?? s;
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function WaiterPage() {
   const router = useRouter();
-  const [tables] = useState<Table[]>(INITIAL_TABLES);
+  const [employee, setEmployee] = useState<{ id: string; full_name: string } | null>(null);
 
+  // Data
+  const [tables, setTables] = useState<TableView[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [readyOrders, setReadyOrders] = useState<(Order & { kitchen_status: string })[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [online, setOnline] = useState(true);
+
+  // Modal state
+  const [selectedTable, setSelectedTable] = useState<TableView | null>(null);
+  const [modalMode, setModalMode] = useState<'view' | 'new-order'>('view');
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [diners, setDiners] = useState(1);
+  const [submitting, setSubmitting] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string>('all');
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const sessionStr = localStorage.getItem('pos_employee_session');
-    if (!sessionStr) {
-      router.push('/login');
-      return;
-    }
-    const session = JSON.parse(sessionStr);
-    if (session.role !== 'admin' && session.role !== 'mesero') {
-      router.push('/');
-    }
+    const s = localStorage.getItem('pos_employee_session');
+    if (!s) { router.push('/login'); return; }
+    const emp = JSON.parse(s);
+    if (emp.role !== 'admin' && emp.role !== 'mesero') { router.push('/'); return; }
+    setEmployee(emp);
   }, [router]);
 
-  const getStatusColor = (status: TableStatus) => {
-    switch (status) {
-      case 'available': return 'bg-emerald-500 text-white border-none';
-      case 'occupied': return 'bg-zinc-100 text-zinc-400 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-500 dark:border-zinc-700';
-      case 'waiting': return 'bg-orange-500 text-white border-none shadow-lg shadow-orange-900/20';
-      case 'ready': return 'bg-blue-500 text-white border-none animate-pulse';
+  // ── Fetch tables from open orders ─────────────────────────────────────────
+  const fetchTables = useCallback(async () => {
+    const { data: openOrders } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('status', 'abierta');
+
+    const map = new Map<number, Order & { kitchen_status: string }>();
+    (openOrders ?? []).forEach((o) => {
+      const tid = parseInt(o.table_id);
+      if (!isNaN(tid)) map.set(tid, o);
+    });
+
+    const built: TableView[] = Array.from({ length: TABLE_COUNT }, (_, i) => {
+      const id = i + 1;
+      const order = map.get(id);
+      if (!order) return { id, status: 'available', diners: 0 };
+      const ks = order.kitchen_status;
+      const status: TableStatus = ks === 'ready' ? 'ready' : ks === 'pending' ? 'occupied' : 'waiting';
+      return { id, status, diners: order.comensales ?? 1, order };
+    });
+
+    setTables(built);
+    setReadyOrders((openOrders ?? []).filter(o => o.kitchen_status === 'ready') as (Order & { kitchen_status: string })[]);
+    setLoading(false);
+  }, []);
+
+  const fetchProducts = useCallback(async () => {
+    const { data } = await supabase.from('products').select('*').eq('is_active', true).order('category');
+    setProducts((data ?? []) as Product[]);
+  }, []);
+
+  useEffect(() => {
+    fetchTables();
+    fetchProducts();
+  }, [fetchTables, fetchProducts]);
+
+  // ── Realtime subscription ─────────────────────────────────────────────────
+  const { isConnected } = useOrdersRealtime({
+    channelName: 'mesero-orders',
+    onchange: () => fetchTables(),
+    onRefresh: fetchTables,
+    pollInterval: 20_000,
+  });
+
+  // Sync online indicator with realtime connection
+  useEffect(() => { setOnline(isConnected); }, [isConnected]);
+
+  // ── Cart helpers ──────────────────────────────────────────────────────────
+  const addToCart = (product: Product) => {
+    setCart(prev => {
+      const existing = prev.find(i => i.product.id === product.id);
+      if (existing) return prev.map(i => i.product.id === product.id ? { ...i, qty: i.qty + 1 } : i);
+      return [...prev, { product, qty: 1, notes: '' }];
+    });
+  };
+
+  const removeFromCart = (id: string) => setCart(prev => {
+    const item = prev.find(i => i.product.id === id);
+    if (!item) return prev;
+    if (item.qty === 1) return prev.filter(i => i.product.id !== id);
+    return prev.map(i => i.product.id === id ? { ...i, qty: i.qty - 1 } : i);
+  });
+
+  const cartTotal = cart.reduce((s, i) => s + i.product.price * i.qty, 0);
+  const cartCount = cart.reduce((s, i) => s + i.qty, 0);
+
+  // ── Submit order ──────────────────────────────────────────────────────────
+  const submitOrder = async () => {
+    if (!selectedTable || cart.length === 0 || !employee) return;
+    setSubmitting(true);
+    try {
+      const { data: order, error: oErr } = await supabase
+        .from('orders')
+        .insert({
+          table_id: String(selectedTable.id),
+          employee_id: employee.id,
+          comensales: diners,
+          status: 'abierta',
+          kitchen_status: 'pending',
+          total: cartTotal,
+        })
+        .select()
+        .single();
+
+      if (oErr || !order) throw oErr;
+
+      await supabase.from('order_items').insert(
+        cart.map(i => ({
+          order_id: order.id,
+          product_id: i.product.id,
+          product_name: i.product.name,
+          quantity: i.qty,
+          price: i.product.price,
+          notes: i.notes || null,
+        }))
+      );
+
+      setCart([]);
+      setSelectedTable(null);
+      await fetchTables();
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const getStatusLabel = (status: TableStatus) => {
-    switch (status) {
-      case 'available': return 'Libre';
-      case 'occupied': return 'Ocupada';
-      case 'waiting': return 'Cocinando';
-      case 'ready': return '¡Listo!';
-    }
+  // ── Mark delivered ────────────────────────────────────────────────────────
+  const markDelivered = async (orderId: string) => {
+    await supabase.from('orders').update({ kitchen_status: 'delivered' }).eq('id', orderId);
+    await fetchTables();
   };
 
+  // ── Open modal ────────────────────────────────────────────────────────────
+  const openTable = (table: TableView) => {
+    setSelectedTable(table);
+    setModalMode(table.status === 'available' ? 'new-order' : 'view');
+    setCart([]);
+    setDiners(table.diners || 1);
+    setActiveCategory('all');
+  };
+
+  const closeModal = () => { setSelectedTable(null); setCart([]); };
+
+  // ── Stats ─────────────────────────────────────────────────────────────────
+  const occupied = tables.filter(t => t.status !== 'available').length;
+  const totalDiners = tables.reduce((s, t) => s + t.diners, 0);
+  const categories = ['all', ...Array.from(new Set(products.map(p => p.category)))];
+  const filteredProducts = activeCategory === 'all' ? products : products.filter(p => p.category === activeCategory);
+
+  // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col font-sans overflow-hidden">
-      {/* Mobile-First Header */}
-      <header className="px-6 py-6 border-b border-zinc-100 dark:border-zinc-900 flex justify-between items-center sticky top-0 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-xl z-50">
-        <div className="flex items-center gap-5">
-           <div className="w-12 h-12 rounded-[1.25rem] bg-orange-600 flex items-center justify-center text-white shadow-xl shadow-orange-900/20 rotate-3 transition-transform">
-             <Flame className="w-6 h-6" />
-           </div>
-           <div>
-             <h1 className="text-xl font-black tracking-tighter uppercase italic">Mesero Digital</h1>
-             <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em] flex items-center gap-1.5">
-               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Servicio Activo
-             </p>
-           </div>
+    <div className="min-h-screen bg-[#f8f8f7] dark:bg-zinc-950 flex flex-col font-sans">
+
+      {/* ── Header ── */}
+      <header className="px-6 py-4 border-b border-zinc-200/60 dark:border-zinc-800 flex justify-between items-center sticky top-0 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-xl z-50 shadow-sm">
+        <div className="flex items-center gap-4">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center shadow-lg shadow-orange-500/30">
+            <Flame className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-base font-black tracking-tighter uppercase italic leading-none">Mesero Digital</h1>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              {online
+                ? <><Wifi className="w-3 h-3 text-emerald-500" /><span className="text-[9px] font-bold text-emerald-600 uppercase tracking-widest">En línea</span></>
+                : <><WifiOff className="w-3 h-3 text-red-400" /><span className="text-[9px] font-bold text-red-500 uppercase tracking-widest">Sin conexión</span></>
+              }
+            </div>
+          </div>
         </div>
-        
-        <div className="flex gap-4 items-center">
-           <UserNav />
-           <Button variant="outline" size="icon" className="w-12 h-12 rounded-2xl border-zinc-100 dark:border-zinc-800 shadow-sm relative">
+
+        <div className="flex items-center gap-3">
+          {readyOrders.length > 0 && (
+            <div className="relative">
               <Bell className="w-5 h-5 text-zinc-400" />
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 rounded-full border-4 border-white dark:border-zinc-950 text-[8px] flex items-center justify-center text-white font-black">2</span>
-           </Button>
-           <Link href="/" className={cn(buttonVariants({ size: "icon" }), "w-12 h-12 rounded-2xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-xl")}>
-              <ArrowLeft className="w-5 h-5" />
-           </Link>
+              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-blue-500 rounded-full text-[8px] text-white font-black flex items-center justify-center animate-bounce">
+                {readyOrders.length}
+              </span>
+            </div>
+          )}
+          <Button variant="ghost" size="icon" onClick={fetchTables} className="w-9 h-9 rounded-xl">
+            <RefreshCw className="w-4 h-4 text-zinc-400" />
+          </Button>
+          <UserNav />
         </div>
       </header>
 
-      {/* Main Waiter Control Grid */}
-      <main className="flex-1 p-6 md:p-10 lg:p-12 overflow-y-auto space-y-12 pb-24">
-        {/* Statistics Bar */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 animate-slide-up">
-           <Card className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-[2rem] p-6 shadow-sm">
-              <p className="text-[9px] font-black tracking-widest text-zinc-400 uppercase mb-2">Mis Mesas</p>
-              <h3 className="text-2xl font-black">8 / 12</h3>
-           </Card>
-           <Card className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-[2rem] p-6 shadow-sm">
-              <p className="text-[9px] font-black tracking-widest text-zinc-400 uppercase mb-2">Comensales</p>
-              <h3 className="text-2xl font-black">24</h3>
-           </Card>
-           <Card className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-[2rem] p-6 shadow-sm">
-              <p className="text-[9px] font-black tracking-widest text-zinc-400 uppercase mb-2">Tiempo Promedio</p>
-              <h3 className="text-2xl font-black">18 min</h3>
-           </Card>
-           <Card className="border-none bg-orange-600 text-white rounded-[2rem] p-6 shadow-xl shadow-orange-900/20">
-              <p className="text-[9px] font-black tracking-widest text-white/50 uppercase mb-2">Listo p/ Entrega</p>
-              <h3 className="text-2xl font-black">2 Órdenes</h3>
-           </Card>
+      <main className="flex-1 p-5 md:p-8 space-y-8 pb-6 overflow-y-auto">
+
+        {/* ── Stats ── */}
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { label: 'Mesas activas', value: `${occupied}/${TABLE_COUNT}`, sub: 'ocupadas' },
+            { label: 'Comensales', value: totalDiners, sub: 'en servicio' },
+            { label: 'Listas', value: readyOrders.length, sub: 'para entregar', highlight: readyOrders.length > 0 },
+          ].map(s => (
+            <div key={s.label} className={cn(
+              "rounded-2xl p-4 border",
+              s.highlight ? "bg-blue-500 border-blue-400 text-white" : "bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800"
+            )}>
+              <p className={cn("text-[9px] font-black uppercase tracking-widest mb-1", s.highlight ? "text-blue-100" : "text-zinc-400")}>{s.label}</p>
+              <p className={cn("text-2xl font-black leading-none", s.highlight ? "text-white" : "text-zinc-900 dark:text-white")}>{s.value}</p>
+              <p className={cn("text-[9px] font-bold mt-0.5", s.highlight ? "text-blue-200" : "text-zinc-400")}>{s.sub}</p>
+            </div>
+          ))}
         </div>
 
-        {/* Tables Section */}
-        <section>
-          <div className="flex justify-between items-end mb-8">
-            <h2 className="text-sm font-black text-zinc-400 uppercase tracking-[0.3em]">Estado de Mesas</h2>
-            <div className="flex gap-2 p-1 bg-zinc-50 dark:bg-zinc-900 rounded-xl">
-               <Button size="sm" variant="ghost" className="h-8 rounded-lg px-4 text-[10px] font-black uppercase text-zinc-400">Piso 1</Button>
-               <Button size="sm" variant="secondary" className="h-8 rounded-lg px-4 text-[10px] font-black uppercase bg-white shadow-sm">Terraza</Button>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 animate-slide-up" style={{animationDelay: '0.15s'}}>
-            {tables.map(table => (
-              <a 
-                href={table.status === 'available' ? '/?mesa=' + table.id : '/?mesa=' + table.id}
-                key={table.id}
-                className={`group relative flex flex-col p-8 rounded-[3rem] border-2 transition-all active:scale-[0.97] shadow-sm hover:shadow-2xl overflow-hidden ${
-                  table.status === 'available' 
-                    ? 'border-zinc-50 bg-zinc-50/30 hover:bg-emerald-50 hover:border-emerald-200 dark:border-zinc-900 dark:bg-zinc-900/10' 
-                    : 'border-transparent bg-white dark:bg-zinc-900'
-                }`}
-              >
-                <div className="flex justify-between items-start mb-10">
-                   <span className={`text-4xl font-black tracking-tighter ${table.status === 'available' ? 'text-zinc-200 dark:text-zinc-800' : 'text-zinc-900 dark:text-white'}`}>
-                      {table.id < 10 ? '0' + table.id : table.id}
-                   </span>
-                   <Badge className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest ${getStatusColor(table.status)}`}>
-                      {getStatusLabel(table.status)}
-                   </Badge>
-                </div>
-
-                <div className="mt-auto space-y-4">
-                   {table.status === 'available' ? (
-                     <div className="flex items-center gap-2">
-                        <Plus className="w-3 h-3 text-emerald-500" />
-                        <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest leading-none">Nueva Mesa</p>
-                     </div>
-                   ) : (
-                     <div className="space-y-3">
-                        <div className="flex -space-x-2">
-                           {[...Array(Math.min(3, table.diners))].map((_, i) => (
-                             <div key={i} className="w-7 h-7 rounded-full bg-zinc-100 dark:bg-zinc-800 border-4 border-white dark:border-zinc-900 flex items-center justify-center text-[10px] shadow-sm">👤</div>
-                           ))}
-                           {table.diners > 3 && (
-                             <div className="w-7 h-7 rounded-full bg-orange-600 text-white border-4 border-white dark:border-zinc-900 flex items-center justify-center text-[8px] font-black">+{table.diners - 3}</div>
-                           )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                           <Clock className="w-3 h-3 text-zinc-300" />
-                           <span className="text-[9px] font-black text-zinc-400 uppercase tracking-widest italic">{table.lastOrderTime}</span>
-                        </div>
-                     </div>
-                   )}
-                </div>
-
-                {/* Hot Overlay Effect for ready food */}
-                {table.status === 'ready' && (
-                  <div className="absolute inset-0 bg-blue-500/5 animate-pulse flex items-center justify-center">
-                     <ChefHat className="w-12 h-12 text-blue-500 opacity-20 rotate-12" />
+        {/* ── Ready orders alert ── */}
+        {readyOrders.length > 0 && (
+          <div className="space-y-2">
+            {readyOrders.map(o => (
+              <div key={o.id} className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl px-5 py-3">
+                <div className="flex items-center gap-3">
+                  <ChefHat className="w-5 h-5 text-blue-500" />
+                  <div>
+                    <p className="text-[10px] font-black text-blue-700 dark:text-blue-300 uppercase tracking-widest">¡Orden lista para entregar!</p>
+                    <p className="text-sm font-black text-blue-900 dark:text-blue-100">Mesa {o.table_id}</p>
                   </div>
-                )}
-              </a>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => markDelivered(o.id)}
+                  className="h-8 px-4 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-[10px] font-black uppercase"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" /> Entregado
+                </Button>
+              </div>
             ))}
           </div>
-        </section>
+        )}
 
-        {/* Notifications / Activity Stream */}
-        <section className="max-w-3xl animate-slide-up" style={{animationDelay: '0.3s'}}>
-           <h3 className="text-sm font-black text-zinc-400 uppercase tracking-[0.3em] mb-6 flex items-center gap-4">
-             Historial de Servicio
-             <Separator className="flex-1 opacity-20" />
-           </h3>
-           <div className="space-y-4">
-             <Card className="border-none bg-blue-50/50 dark:bg-blue-900/10 rounded-[2.5rem] p-4 border border-blue-100 dark:border-blue-900/20 relative group overflow-hidden">
-               <div className="flex items-center gap-6">
-                 <div className="w-14 h-14 bg-blue-500 rounded-[1.25rem] flex items-center justify-center text-white text-2xl shadow-xl shadow-blue-900/20 rotate-3 transition-transform group-hover:rotate-0">
-                   🍳
-                 </div>
-                 <div className="flex-1">
-                   <p className="text-[10px] font-black text-blue-800 dark:text-blue-300 uppercase tracking-widest">¡Orden Lista para Entrega!</p>
-                   <h4 className="font-black text-lg text-blue-900 dark:text-blue-100 tracking-tight">Mesa 4 • 3 Tacos de Tripa</h4>
-                 </div>
-                 <div className="text-right">
-                    <span className="text-[10px] font-black text-blue-500 uppercase italic">Hace 2 min</span>
-                 </div>
-               </div>
-               <div className="absolute top-0 right-0 p-2 opacity-5 group-hover:opacity-10 transition-opacity">
-                  <CheckCircle2 className="w-20 h-20 -rotate-12" />
-               </div>
-             </Card>
+        {/* ── Tables grid ── */}
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.3em]">Mapa de Mesas</h2>
+            <div className="flex items-center gap-3 text-[9px] font-black uppercase tracking-widest text-zinc-400">
+              {Object.entries(statusMeta).map(([k, v]) => (
+                <span key={k} className="flex items-center gap-1.5">
+                  <span className={cn("w-2 h-2 rounded-full", v.dot)} />{v.label}
+                </span>
+              ))}
+            </div>
+          </div>
 
-             <Card className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-[2.5rem] p-4 border border-zinc-100 dark:border-zinc-800 opacity-60">
-               <div className="flex items-center gap-6">
-                 <div className="w-14 h-14 bg-zinc-500 rounded-[1.25rem] flex items-center justify-center text-white text-2xl">
-                   🌮
-                 </div>
-                 <div className="flex-1">
-                   <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Entregado con Éxito</p>
-                   <h4 className="font-black text-lg text-zinc-700 dark:text-zinc-300 tracking-tight">Mesa 1 • Cuenta Cerrada</h4>
-                 </div>
-                 <div className="text-right">
-                    <span className="text-[10px] font-black text-zinc-400 uppercase italic">Hace 15 min</span>
-                 </div>
-               </div>
-             </Card>
-           </div>
+          {loading ? (
+            <div className="h-64 flex items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+              {tables.map(table => (
+                <button
+                  key={table.id}
+                  onClick={() => openTable(table)}
+                  className={cn(
+                    "group relative flex flex-col p-4 rounded-2xl border-2 transition-all duration-200 text-left active:scale-95 hover:shadow-lg",
+                    table.status === 'available'
+                      ? "border-dashed border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-emerald-300 hover:bg-emerald-50/50"
+                      : table.status === 'ready'
+                      ? "border-blue-300 bg-blue-50 dark:bg-blue-900/20 shadow-md shadow-blue-100"
+                      : "border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm"
+                  )}
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <span className={cn(
+                      "text-2xl font-black tracking-tighter leading-none",
+                      table.status === 'available' ? "text-zinc-200 dark:text-zinc-700" : "text-zinc-900 dark:text-white"
+                    )}>
+                      {String(table.id).padStart(2, '0')}
+                    </span>
+                    <span className={cn("w-2 h-2 rounded-full mt-1", statusMeta[table.status].dot)} />
+                  </div>
+
+                  {table.status === 'available' ? (
+                    <div className="flex items-center gap-1 mt-auto">
+                      <Plus className="w-3 h-3 text-emerald-500" />
+                      <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">Nueva</span>
+                    </div>
+                  ) : (
+                    <div className="mt-auto space-y-1.5">
+                      <div className="flex items-center gap-1">
+                        <Users className="w-3 h-3 text-zinc-400" />
+                        <span className="text-[9px] font-bold text-zinc-500">{table.diners} pers.</span>
+                      </div>
+                      {table.order && (
+                        <span className={cn(
+                          "text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md",
+                          statusMeta[table.status].color
+                        )}>
+                          {kitchenLabel(table.order.kitchen_status)}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </section>
       </main>
 
-      {/* Modern Bottom Navigation Bar */}
-      <nav className="p-4 px-10 border-t border-zinc-100 dark:border-zinc-900 flex justify-around bg-white/95 dark:bg-zinc-950/95 backdrop-blur-xl sticky bottom-0 z-50">
-         <Button variant="ghost" className="flex flex-col items-center gap-1.5 h-auto py-2 group">
-           <LayoutGrid className="w-6 h-6 text-orange-600" />
-           <span className="text-[8px] font-black uppercase text-orange-600 tracking-widest">Mesas</span>
-         </Button>
-         <Button variant="ghost" className="flex flex-col items-center gap-1.5 h-auto py-2 group opacity-40 hover:opacity-100 transition-opacity">
-           <MapPin className="w-6 h-6 text-zinc-400" />
-           <span className="text-[8px] font-black uppercase text-zinc-400 tracking-widest">Zonas</span>
-         </Button>
-         <Button variant="ghost" className="flex flex-col items-center gap-1.5 h-auto py-2 group opacity-40 hover:opacity-100 transition-opacity">
-           <ChefHat className="w-6 h-6 text-zinc-400" />
-           <span className="text-[8px] font-black uppercase text-zinc-400 tracking-widest">Cocina</span>
-         </Button>
-         <Button variant="ghost" className="flex flex-col items-center gap-1.5 h-auto py-2 group opacity-40 hover:opacity-100 transition-opacity">
-           <Users className="w-6 h-6 text-zinc-400" />
-           <span className="text-[8px] font-black uppercase text-zinc-400 tracking-widest">Personal</span>
-         </Button>
-      </nav>
+      {/* ── Modal ── */}
+      {selectedTable && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={closeModal} />
+          <div className="relative w-full sm:max-w-lg bg-white dark:bg-zinc-900 rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
+
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-100 dark:border-zinc-800">
+              <div>
+                <h3 className="text-lg font-black tracking-tighter uppercase italic">Mesa {String(selectedTable.id).padStart(2, '0')}</h3>
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+                  {selectedTable.status === 'available' ? 'Nueva orden' : `${selectedTable.diners} comensales • ${kitchenLabel(selectedTable.order?.kitchen_status ?? '')}`}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedTable.status !== 'available' && (
+                  <Button size="sm" onClick={() => setModalMode('new-order')}
+                    className="h-8 px-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[10px] font-black uppercase">
+                    <Plus className="w-3 h-3 mr-1" /> Agregar
+                  </Button>
+                )}
+                <button onClick={closeModal} className="w-8 h-8 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                  <X className="w-4 h-4 text-zinc-500" />
+                </button>
+              </div>
+            </div>
+
+            {/* View mode: table detail */}
+            {modalMode === 'view' && selectedTable.order && (
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Estado cocina', value: kitchenLabel(selectedTable.order.kitchen_status) },
+                    { label: 'Comensales', value: selectedTable.diners },
+                    { label: 'Total', value: `$${selectedTable.order.total.toLocaleString()}` },
+                    { label: 'Hora', value: new Date(selectedTable.order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+                  ].map(item => (
+                    <div key={item.label} className="bg-zinc-50 dark:bg-zinc-800 rounded-xl p-3">
+                      <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">{item.label}</p>
+                      <p className="text-base font-black text-zinc-900 dark:text-white mt-0.5">{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+                {selectedTable.order.kitchen_status === 'ready' && (
+                  <Button onClick={() => markDelivered(selectedTable.order!.id)} className="w-full h-12 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-black uppercase tracking-widest text-xs">
+                    <CheckCircle2 className="w-4 h-4 mr-2" /> Marcar como Entregado
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* New order mode */}
+            {modalMode === 'new-order' && (
+              <>
+                {/* Diners selector */}
+                <div className="px-6 py-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                  <span className="text-xs font-black text-zinc-500 uppercase tracking-widest">Comensales</span>
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => setDiners(d => Math.max(1, d - 1))} className="w-8 h-8 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="text-xl font-black w-6 text-center">{diners}</span>
+                    <button onClick={() => setDiners(d => d + 1)} className="w-8 h-8 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Category tabs */}
+                <div className="px-6 py-3 flex gap-2 overflow-x-auto border-b border-zinc-100 dark:border-zinc-800 scrollbar-none">
+                  {categories.map(cat => (
+                    <button key={cat} onClick={() => setActiveCategory(cat)}
+                      className={cn(
+                        "shrink-0 h-7 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                        activeCategory === cat ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-900" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500"
+                      )}>
+                      {cat === 'all' ? 'Todo' : cat}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Products */}
+                <div className="flex-1 overflow-y-auto p-4 grid grid-cols-2 gap-2">
+                  {filteredProducts.length === 0 ? (
+                    <div className="col-span-2 h-32 flex flex-col items-center justify-center text-zinc-300">
+                      <UtensilsCrossed className="w-8 h-8 mb-2" />
+                      <p className="text-xs font-bold">Sin productos</p>
+                    </div>
+                  ) : filteredProducts.map(p => {
+                    const inCart = cart.find(i => i.product.id === p.id);
+                    return (
+                      <button key={p.id} onClick={() => addToCart(p)}
+                        className={cn(
+                          "relative flex flex-col items-start p-3 rounded-xl border-2 text-left transition-all active:scale-95",
+                          inCart ? "border-orange-400 bg-orange-50 dark:bg-orange-900/20" : "border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-800 hover:border-zinc-200"
+                        )}>
+                        <span className="text-xs font-black text-zinc-900 dark:text-white leading-tight">{p.name}</span>
+                        <span className="text-[10px] font-bold text-zinc-400 mt-0.5">{p.category}</span>
+                        <span className="text-sm font-black text-orange-600 mt-2">${p.price}</span>
+                        {inCart && (
+                          <span className="absolute top-2 right-2 w-5 h-5 bg-orange-500 rounded-full text-[9px] text-white font-black flex items-center justify-center">
+                            {inCart.qty}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Cart summary + submit */}
+                {cart.length > 0 && (
+                  <div className="border-t border-zinc-100 dark:border-zinc-800 p-4 space-y-3">
+                    <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
+                      {cart.map(item => (
+                        <div key={item.product.id} className="flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg px-2 py-1">
+                          <span className="text-[10px] font-black">{item.qty}× {item.product.name}</span>
+                          <button onClick={() => removeFromCart(item.product.id)} className="text-zinc-400 hover:text-red-500">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">{cartCount} items</p>
+                        <p className="text-xl font-black text-zinc-900 dark:text-white">${cartTotal.toLocaleString()}</p>
+                      </div>
+                      <Button onClick={submitOrder} disabled={submitting}
+                        className="h-12 px-6 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-black uppercase tracking-widest text-xs shadow-lg shadow-orange-500/30">
+                        {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShoppingBag className="w-4 h-4 mr-2" />Enviar a Cocina</>}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -5,10 +5,11 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
   Loader2, ChefHat, Clock, Flame, CheckCircle2,
-  Truck, Bell, RefreshCw, LogOut, Volume2,
+  Truck, Bell, RefreshCw, LogOut, Volume2, Wifi, WifiOff,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { KitchenStatus } from '@/lib/types';
+import { useOrdersRealtime } from '@/hooks/use-orders-realtime';
 
 type OrderItem = {
   id: string; product_name: string; quantity: number; seat_number: number | null;
@@ -43,7 +44,6 @@ export default function CocinaPage() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const prevPendingIds = useRef<Set<string>>(new Set());
   const audioCtx = useRef<AudioContext | null>(null);
-
   // Auth check
   useEffect(() => {
     void (async () => {
@@ -95,20 +95,13 @@ export default function CocinaPage() {
   // Initial load
   useEffect(() => { (async () => { await fetchOrders(); })(); }, [fetchOrders]);
 
-  // Realtime subscription
-  useEffect(() => {
-    const channel = supabase
-      .channel('kitchen-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [fetchOrders]);
-
-  // Polling fallback every 15s
-  useEffect(() => {
-    const t = setInterval(fetchOrders, 15000);
-    return () => clearInterval(t);
-  }, [fetchOrders]);
+  // Realtime + polling via shared hook
+  const { isConnected } = useOrdersRealtime({
+    channelName: 'cocina-orders',
+    onchange: () => fetchOrders(),
+    onRefresh: fetchOrders,
+    pollInterval: 15_000,
+  });
 
   const advance = async (order: KitchenOrder) => {
     const cfg = STATUS[order.kitchen_status];
@@ -138,6 +131,10 @@ export default function CocinaPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {isConnected
+            ? <Wifi className="w-3.5 h-3.5 text-emerald-500" aria-label="Tiempo real activo" />
+            : <WifiOff className="w-3.5 h-3.5 text-red-400 animate-pulse" aria-label="Sin conexión realtime" />
+          }
           <button
             type="button"
             onClick={() => setSoundEnabled(s => !s)}
@@ -153,8 +150,7 @@ export default function CocinaPage() {
             className="h-9 w-9 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-400 hover:bg-zinc-700 transition-colors"
           >
             <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
-          </button>
-          <button
+          </button>          <button
             type="button"
             onClick={() => { localStorage.removeItem('pos_employee_session'); router.push('/login'); }}
             className="h-9 w-9 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-400 hover:bg-red-900/50 hover:text-red-400 transition-colors"
