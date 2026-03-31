@@ -1,6 +1,27 @@
 'use client';
 
 import React, { useState } from 'react';
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { 
+  Bell, 
+  ChefHat, 
+  MapPin, 
+  Users, 
+  Plus, 
+  Clock, 
+  LayoutGrid, 
+  ArrowLeft, 
+  Flame, 
+  CheckCircle2, 
+} from "lucide-react";
+import { UserNav } from "@/components/UserNav";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import Link from "next/link";
 
 type TableStatus = 'available' | 'occupied' | 'waiting' | 'ready';
 
@@ -23,14 +44,27 @@ const INITIAL_TABLES: Table[] = [
 ];
 
 export default function WaiterPage() {
-  const [tables, setTables] = useState<Table[]>(INITIAL_TABLES);
+  const router = useRouter();
+  const [tables] = useState<Table[]>(INITIAL_TABLES);
+
+  useEffect(() => {
+    const sessionStr = localStorage.getItem('pos_employee_session');
+    if (!sessionStr) {
+      router.push('/login');
+      return;
+    }
+    const session = JSON.parse(sessionStr);
+    if (session.role !== 'admin' && session.role !== 'mesero') {
+      router.push('/');
+    }
+  }, [router]);
 
   const getStatusColor = (status: TableStatus) => {
     switch (status) {
-      case 'available': return 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-900/50';
-      case 'occupied': return 'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700';
-      case 'waiting': return 'bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950/30 dark:text-orange-400 dark:border-orange-900/50';
-      case 'ready': return 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-400 dark:border-blue-900/50';
+      case 'available': return 'bg-emerald-500 text-white border-none';
+      case 'occupied': return 'bg-zinc-100 text-zinc-400 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-500 dark:border-zinc-700';
+      case 'waiting': return 'bg-orange-500 text-white border-none shadow-lg shadow-orange-900/20';
+      case 'ready': return 'bg-blue-500 text-white border-none animate-pulse';
     }
   };
 
@@ -39,134 +73,186 @@ export default function WaiterPage() {
       case 'available': return 'Libre';
       case 'occupied': return 'Ocupada';
       case 'waiting': return 'Cocinando';
-      case 'ready': return 'Listo';
+      case 'ready': return '¡Listo!';
     }
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col font-sans">
-      {/* Waiter Header */}
-      <header className="p-4 border-b border-zinc-100 dark:border-zinc-900 flex justify-between items-center sticky top-0 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md z-10">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-[#c2410c] flex items-center justify-center text-white shadow-lg shadow-orange-900/20">
-            <span className="text-xl">🏃</span>
-          </div>
-          <div>
-             <h1 className="font-black text-lg tracking-tight uppercase">Mesero Digital</h1>
-             <p className="text-[10px] font-bold text-zinc-400">Carlos M. • Piso 1</p>
-          </div>
+    <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col font-sans overflow-hidden">
+      {/* Mobile-First Header */}
+      <header className="px-6 py-6 border-b border-zinc-100 dark:border-zinc-900 flex justify-between items-center sticky top-0 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-xl z-50">
+        <div className="flex items-center gap-5">
+           <div className="w-12 h-12 rounded-[1.25rem] bg-orange-600 flex items-center justify-center text-white shadow-xl shadow-orange-900/20 rotate-3 transition-transform">
+             <Flame className="w-6 h-6" />
+           </div>
+           <div>
+             <h1 className="text-xl font-black tracking-tighter uppercase italic">Mesero Digital</h1>
+             <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em] flex items-center gap-1.5">
+               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Servicio Activo
+             </p>
+           </div>
         </div>
         
-        <div className="flex gap-2">
-           <a href="/" className="px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs font-bold hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all">
-             Menú
-           </a>
-           <button className="w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center relative">
-              🔔
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white dark:border-zinc-950 text-[8px] flex items-center justify-center text-white font-bold">2</span>
-           </button>
+        <div className="flex gap-4 items-center">
+           <UserNav />
+           <Button variant="outline" size="icon" className="w-12 h-12 rounded-2xl border-zinc-100 dark:border-zinc-800 shadow-sm relative">
+              <Bell className="w-5 h-5 text-zinc-400" />
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 rounded-full border-4 border-white dark:border-zinc-950 text-[8px] flex items-center justify-center text-white font-black">2</span>
+           </Button>
+           <Link href="/" className={cn(buttonVariants({ size: "icon" }), "w-12 h-12 rounded-2xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-xl")}>
+              <ArrowLeft className="w-5 h-5" />
+           </Link>
         </div>
       </header>
 
-      {/* Main Grid */}
-      <main className="flex-1 p-4 overflow-y-auto">
-        <div className="mb-6">
-          <h2 className="text-sm font-black text-zinc-400 uppercase tracking-widest mb-4">Estado de Mesas</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 animate-slide-up">
+      {/* Main Waiter Control Grid */}
+      <main className="flex-1 p-6 md:p-10 lg:p-12 overflow-y-auto space-y-12 pb-24">
+        {/* Statistics Bar */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 animate-slide-up">
+           <Card className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-[2rem] p-6 shadow-sm">
+              <p className="text-[9px] font-black tracking-widest text-zinc-400 uppercase mb-2">Mis Mesas</p>
+              <h3 className="text-2xl font-black">8 / 12</h3>
+           </Card>
+           <Card className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-[2rem] p-6 shadow-sm">
+              <p className="text-[9px] font-black tracking-widest text-zinc-400 uppercase mb-2">Comensales</p>
+              <h3 className="text-2xl font-black">24</h3>
+           </Card>
+           <Card className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-[2rem] p-6 shadow-sm">
+              <p className="text-[9px] font-black tracking-widest text-zinc-400 uppercase mb-2">Tiempo Promedio</p>
+              <h3 className="text-2xl font-black">18 min</h3>
+           </Card>
+           <Card className="border-none bg-orange-600 text-white rounded-[2rem] p-6 shadow-xl shadow-orange-900/20">
+              <p className="text-[9px] font-black tracking-widest text-white/50 uppercase mb-2">Listo p/ Entrega</p>
+              <h3 className="text-2xl font-black">2 Órdenes</h3>
+           </Card>
+        </div>
+
+        {/* Tables Section */}
+        <section>
+          <div className="flex justify-between items-end mb-8">
+            <h2 className="text-sm font-black text-zinc-400 uppercase tracking-[0.3em]">Estado de Mesas</h2>
+            <div className="flex gap-2 p-1 bg-zinc-50 dark:bg-zinc-900 rounded-xl">
+               <Button size="sm" variant="ghost" className="h-8 rounded-lg px-4 text-[10px] font-black uppercase text-zinc-400">Piso 1</Button>
+               <Button size="sm" variant="secondary" className="h-8 rounded-lg px-4 text-[10px] font-black uppercase bg-white shadow-sm">Terraza</Button>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 animate-slide-up" style={{animationDelay: '0.15s'}}>
             {tables.map(table => (
               <a 
                 href={table.status === 'available' ? '/?mesa=' + table.id : '/?mesa=' + table.id}
                 key={table.id}
-                className={`relative flex flex-col p-5 rounded-[2.5rem] border-2 transition-all active:scale-95 group shadow-sm ${
+                className={`group relative flex flex-col p-8 rounded-[3rem] border-2 transition-all active:scale-[0.97] shadow-sm hover:shadow-2xl overflow-hidden ${
                   table.status === 'available' 
-                    ? 'border-zinc-100 bg-zinc-50/50 hover:bg-emerald-50 hover:border-emerald-200 dark:border-zinc-900 dark:bg-zinc-900/30' 
-                    : 'border-transparent bg-white dark:bg-zinc-900 shadow-xl'
+                    ? 'border-zinc-50 bg-zinc-50/30 hover:bg-emerald-50 hover:border-emerald-200 dark:border-zinc-900 dark:bg-zinc-900/10' 
+                    : 'border-transparent bg-white dark:bg-zinc-900'
                 }`}
               >
-                <div className="flex justify-between items-start mb-3">
-                   <span className="text-3xl font-black">{table.id}</span>
-                   <div className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tight border ${getStatusColor(table.status)}`}>
+                <div className="flex justify-between items-start mb-10">
+                   <span className={`text-4xl font-black tracking-tighter ${table.status === 'available' ? 'text-zinc-200 dark:text-zinc-800' : 'text-zinc-900 dark:text-white'}`}>
+                      {table.id < 10 ? '0' + table.id : table.id}
+                   </span>
+                   <Badge className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest ${getStatusColor(table.status)}`}>
                       {getStatusLabel(table.status)}
-                   </div>
+                   </Badge>
                 </div>
 
-                <div className="mt-auto">
+                <div className="mt-auto space-y-4">
                    {table.status === 'available' ? (
-                     <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Abrir Mesa</p>
-                   ) : (
                      <div className="flex items-center gap-2">
+                        <Plus className="w-3 h-3 text-emerald-500" />
+                        <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest leading-none">Nueva Mesa</p>
+                     </div>
+                   ) : (
+                     <div className="space-y-3">
                         <div className="flex -space-x-2">
                            {[...Array(Math.min(3, table.diners))].map((_, i) => (
-                             <div key={i} className="w-5 h-5 rounded-full bg-zinc-200 dark:bg-zinc-700 border border-white dark:border-zinc-900 flex items-center justify-center text-[8px]">
-                               👤
-                             </div>
+                             <div key={i} className="w-7 h-7 rounded-full bg-zinc-100 dark:bg-zinc-800 border-4 border-white dark:border-zinc-900 flex items-center justify-center text-[10px] shadow-sm">👤</div>
                            ))}
                            {table.diners > 3 && (
-                             <div className="w-5 h-5 rounded-full bg-orange-600 text-white border border-white dark:border-zinc-900 flex items-center justify-center text-[7px] font-bold">
-                               +{table.diners - 3}
-                             </div>
+                             <div className="w-7 h-7 rounded-full bg-orange-600 text-white border-4 border-white dark:border-zinc-900 flex items-center justify-center text-[8px] font-black">+{table.diners - 3}</div>
                            )}
                         </div>
-                        <span className="text-[10px] font-bold text-zinc-400">Hace {table.lastOrderTime}</span>
+                        <div className="flex items-center gap-2">
+                           <Clock className="w-3 h-3 text-zinc-300" />
+                           <span className="text-[9px] font-black text-zinc-400 uppercase tracking-widest italic">{table.lastOrderTime}</span>
+                        </div>
                      </div>
                    )}
                 </div>
 
-                {/* Hot Notifications on cards */}
+                {/* Hot Overlay Effect for ready food */}
                 {table.status === 'ready' && (
-                  <span className="absolute -top-1 -right-1 flex h-4 w-4">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-4 w-4 bg-blue-500 border-2 border-white dark:border-zinc-950"></span>
-                  </span>
+                  <div className="absolute inset-0 bg-blue-500/5 animate-pulse flex items-center justify-center">
+                     <ChefHat className="w-12 h-12 text-blue-500 opacity-20 rotate-12" />
+                  </div>
                 )}
               </a>
             ))}
           </div>
-        </div>
+        </section>
 
-        {/* Action Feed / Recent Events */}
-        <section className="mt-8">
-           <h3 className="text-sm font-black text-zinc-400 uppercase tracking-widest mb-4">Notificaciones de Cocina</h3>
-           <div className="space-y-3">
-             <div className="flex items-center gap-4 bg-blue-50 dark:bg-blue-900/10 p-4 rounded-3xl border border-blue-100 dark:border-blue-900/30">
-               <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white text-xl">
-                 🍳
+        {/* Notifications / Activity Stream */}
+        <section className="max-w-3xl animate-slide-up" style={{animationDelay: '0.3s'}}>
+           <h3 className="text-sm font-black text-zinc-400 uppercase tracking-[0.3em] mb-6 flex items-center gap-4">
+             Historial de Servicio
+             <Separator className="flex-1 opacity-20" />
+           </h3>
+           <div className="space-y-4">
+             <Card className="border-none bg-blue-50/50 dark:bg-blue-900/10 rounded-[2.5rem] p-4 border border-blue-100 dark:border-blue-900/20 relative group overflow-hidden">
+               <div className="flex items-center gap-6">
+                 <div className="w-14 h-14 bg-blue-500 rounded-[1.25rem] flex items-center justify-center text-white text-2xl shadow-xl shadow-blue-900/20 rotate-3 transition-transform group-hover:rotate-0">
+                   🍳
+                 </div>
+                 <div className="flex-1">
+                   <p className="text-[10px] font-black text-blue-800 dark:text-blue-300 uppercase tracking-widest">¡Orden Lista para Entrega!</p>
+                   <h4 className="font-black text-lg text-blue-900 dark:text-blue-100 tracking-tight">Mesa 4 • 3 Tacos de Tripa</h4>
+                 </div>
+                 <div className="text-right">
+                    <span className="text-[10px] font-black text-blue-500 uppercase italic">Hace 2 min</span>
+                 </div>
                </div>
-               <div className="flex-1">
-                 <p className="text-xs font-bold text-blue-800 dark:text-blue-300">¡Orden Lista!</p>
-                 <h4 className="font-black text-sm text-blue-900 dark:text-blue-100">Mesa 4 • 3 Tacos de Tripa</h4>
+               <div className="absolute top-0 right-0 p-2 opacity-5 group-hover:opacity-10 transition-opacity">
+                  <CheckCircle2 className="w-20 h-20 -rotate-12" />
                </div>
-               <span className="text-[10px] font-medium text-blue-500">hace 2 min</span>
-             </div>
+             </Card>
 
-             <div className="flex items-center gap-4 bg-zinc-50 dark:bg-zinc-900 p-4 rounded-3xl border border-zinc-100 dark:border-zinc-800 opacity-60">
-               <div className="w-10 h-10 bg-zinc-400 rounded-full flex items-center justify-center text-white text-xl">
-                 🌮
+             <Card className="border-none bg-zinc-50 dark:bg-zinc-900 rounded-[2.5rem] p-4 border border-zinc-100 dark:border-zinc-800 opacity-60">
+               <div className="flex items-center gap-6">
+                 <div className="w-14 h-14 bg-zinc-500 rounded-[1.25rem] flex items-center justify-center text-white text-2xl">
+                   🌮
+                 </div>
+                 <div className="flex-1">
+                   <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Entregado con Éxito</p>
+                   <h4 className="font-black text-lg text-zinc-700 dark:text-zinc-300 tracking-tight">Mesa 1 • Cuenta Cerrada</h4>
+                 </div>
+                 <div className="text-right">
+                    <span className="text-[10px] font-black text-zinc-400 uppercase italic">Hace 15 min</span>
+                 </div>
                </div>
-               <div className="flex-1">
-                 <p className="text-xs font-bold text-zinc-500">Entregado</p>
-                 <h4 className="font-black text-sm text-zinc-700 dark:text-zinc-300">Mesa 1 • Cuenta Cerrada</h4>
-               </div>
-               <span className="text-[10px] font-medium text-zinc-400">hace 15 min</span>
-             </div>
+             </Card>
            </div>
         </section>
       </main>
 
-      {/* Mobile Bar Navigation */}
-      <nav className="p-4 border-t border-zinc-100 dark:border-zinc-900 flex justify-around bg-white dark:bg-zinc-950 sticky bottom-0">
-         <button className="flex flex-col items-center gap-1 group">
-           <span className="text-xl group-hover:scale-110 transition-transform">📋</span>
-           <span className="text-[8px] font-black uppercase text-[#c2410c] tracking-widest">Mesas</span>
-         </button>
-         <button className="flex flex-col items-center gap-1 group opacity-40 hover:opacity-100 transition-opacity">
-           <span className="text-xl group-hover:scale-110 transition-transform">🔥</span>
-           <span className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">Pedidos</span>
-         </button>
-         <button className="flex flex-col items-center gap-1 group opacity-40 hover:opacity-100 transition-opacity">
-           <span className="text-xl group-hover:scale-110 transition-transform">👤</span>
-           <span className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">Cuenta</span>
-         </button>
+      {/* Modern Bottom Navigation Bar */}
+      <nav className="p-4 px-10 border-t border-zinc-100 dark:border-zinc-900 flex justify-around bg-white/95 dark:bg-zinc-950/95 backdrop-blur-xl sticky bottom-0 z-50">
+         <Button variant="ghost" className="flex flex-col items-center gap-1.5 h-auto py-2 group">
+           <LayoutGrid className="w-6 h-6 text-orange-600" />
+           <span className="text-[8px] font-black uppercase text-orange-600 tracking-widest">Mesas</span>
+         </Button>
+         <Button variant="ghost" className="flex flex-col items-center gap-1.5 h-auto py-2 group opacity-40 hover:opacity-100 transition-opacity">
+           <MapPin className="w-6 h-6 text-zinc-400" />
+           <span className="text-[8px] font-black uppercase text-zinc-400 tracking-widest">Zonas</span>
+         </Button>
+         <Button variant="ghost" className="flex flex-col items-center gap-1.5 h-auto py-2 group opacity-40 hover:opacity-100 transition-opacity">
+           <ChefHat className="w-6 h-6 text-zinc-400" />
+           <span className="text-[8px] font-black uppercase text-zinc-400 tracking-widest">Cocina</span>
+         </Button>
+         <Button variant="ghost" className="flex flex-col items-center gap-1.5 h-auto py-2 group opacity-40 hover:opacity-100 transition-opacity">
+           <Users className="w-6 h-6 text-zinc-400" />
+           <span className="text-[8px] font-black uppercase text-zinc-400 tracking-widest">Personal</span>
+         </Button>
       </nav>
     </div>
   );

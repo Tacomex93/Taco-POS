@@ -1,0 +1,3 @@
+-- Obsoleto: el esquema completo vive en supabase/schema.sql
+-- Aplica cambios con: npm run db:sync (variable DATABASE_URL)
+-- O pega el contenido de supabase/schema.sql en el SQL Editor de Supabase.
