@@ -26,6 +26,23 @@ export default function LoginPage() {
     setError(null);
   };
 
+  // Keyboard support
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key >= '0' && e.key <= '9') handleNumberClick(e.key);
+      else if (e.key === 'Backspace') handleDelete();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pin]);
+
+  // Auto-submit when pin reaches 4 digits
+  React.useEffect(() => {
+    if (pin.length === 4) verifyPin(pin);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pin]);
+
   const triggerShake = () => {
     setShake(true);
     setTimeout(() => setShake(false), 500);
