@@ -45,6 +45,7 @@ export default function CocinaPage() {
   const [updating, setUpdating] = useState<string | null>(null);
   const [employee, setEmployee] = useState<{ full_name: string } | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [mobileCol, setMobileCol] = useState<KitchenStatus>('pending');
   const prevPendingIds = useRef<Set<string>>(new Set());
   const audioCtx = useRef<AudioContext | null>(null);
 
@@ -113,7 +114,10 @@ export default function CocinaPage() {
     // Detect new pending → beep
     const newPendingIds = new Set(rows.filter(o => o.kitchen_status === 'pending').map(o => o.id));
     const hasNew = [...newPendingIds].some(id => !prevPendingIds.current.has(id));
-    if (hasNew && prevPendingIds.current.size > 0) playBeep();
+    if (hasNew && prevPendingIds.current.size > 0) {
+      playBeep();
+      setMobileCol('pending'); // auto-switch to pending tab on mobile
+    }
     prevPendingIds.current = newPendingIds;
 
     // Persist to cache
@@ -281,20 +285,56 @@ export default function CocinaPage() {
         </div>
       </div>
 
-      {/* ── Kanban ── */}
+      {/* ── Kanban — scrollable horizontally on mobile, 3 cols on desktop ── */}
       {loading ? (
         <div className="flex-1 flex items-center justify-center opacity-30">
           <Loader2 className="h-12 w-12 animate-spin text-orange-600" />
         </div>
       ) : (
-        <div className="flex-1 overflow-hidden grid grid-cols-3 gap-0 divide-x divide-zinc-800">
+        <div className="flex-1 overflow-hidden flex flex-col md:grid md:grid-cols-3 md:divide-x md:divide-zinc-800">
+          {/* Mobile: tab selector */}
+          <div className="md:hidden shrink-0 flex border-b border-zinc-800 bg-zinc-900">
+            {COLUMNS.map(s => {
+              const cfg = STATUS[s];
+              const count = grouped[s]?.length ?? 0;
+              return (
+                <button
+                  key={s}
+                  onClick={() => setMobileCol(s)}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-2 py-3 text-[10px] font-black uppercase tracking-widest transition-colors',
+                    mobileCol === s
+                      ? s === 'pending' ? 'text-red-400 border-b-2 border-red-400'
+                        : s === 'preparing' ? 'text-orange-400 border-b-2 border-orange-400'
+                        : 'text-emerald-400 border-b-2 border-emerald-400'
+                      : 'text-zinc-600'
+                  )}
+                >
+                  {cfg.label}
+                  {count > 0 && (
+                    <span className={cn('w-5 h-5 rounded-full text-[9px] font-black flex items-center justify-center',
+                      s === 'pending' ? 'bg-red-500 text-white' : s === 'preparing' ? 'bg-orange-500 text-white' : 'bg-emerald-500 text-white')}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
           {COLUMNS.map(status => {
             const cfg = STATUS[status];
             const Icon = cfg.icon;
             const colOrders = grouped[status] ?? [];
             return (
-              <div key={status} className="flex flex-col overflow-hidden">
-                <div className={cn('shrink-0 flex items-center justify-between px-4 py-3 border-b border-zinc-800',
+              <div key={status} className={cn(
+                'flex flex-col overflow-hidden',
+                // On mobile show only the selected column
+                'md:flex',
+                mobileCol === status ? 'flex' : 'hidden md:flex'
+              )}>
+                {/* Column header — desktop only */}
+                <div className={cn('hidden md:flex shrink-0 items-center justify-between px-4 py-3 border-b border-zinc-800',
                   status === 'pending' ? 'bg-red-950/30' : status === 'preparing' ? 'bg-orange-950/30' : 'bg-emerald-950/30')}>
                   <div className="flex items-center gap-2">
                     <Icon className={cn('w-4 h-4',
@@ -337,7 +377,7 @@ export default function CocinaPage() {
                               age >= 15 ? 'text-red-500' : age >= 8 ? 'text-orange-500' : 'text-zinc-400')}>
                               <Clock className="w-3 h-3" /> {age}m
                             </span>
-                            <span className="text-[9px] text-zinc-400">{fmtTime(order.created_at)}</span>
+                            <span className="text-[9px] text-zinc-400 hidden sm:inline">{fmtTime(order.created_at)}</span>
                           </div>
                         </div>
 
@@ -362,7 +402,7 @@ export default function CocinaPage() {
                               onClick={() => advance(order)}
                               disabled={isPending}
                               className={cn(
-                                'w-full h-10 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2',
+                                'w-full h-12 rounded-xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2',
                                 status === 'pending' ? 'bg-red-500 hover:bg-red-400 text-white'
                                   : status === 'preparing' ? 'bg-orange-500 hover:bg-orange-400 text-white'
                                   : 'bg-emerald-500 hover:bg-emerald-400 text-white'

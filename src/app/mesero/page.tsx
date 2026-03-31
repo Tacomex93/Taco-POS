@@ -223,23 +223,23 @@ export default function WaiterPage() {
     <div className="min-h-screen bg-[#f8f8f7] dark:bg-zinc-950 flex flex-col font-sans">
 
       {/* ── Header ── */}
-      <header className="px-6 py-4 border-b border-zinc-200/60 dark:border-zinc-800 flex justify-between items-center sticky top-0 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-xl z-50 shadow-sm">
-        <div className="flex items-center gap-4">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center shadow-lg shadow-orange-500/30">
-            <Flame className="w-5 h-5 text-white" />
+      <header className="px-4 py-3 border-b border-zinc-200/60 dark:border-zinc-800 flex justify-between items-center sticky top-0 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-xl z-50 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center shadow-lg shadow-orange-500/30 shrink-0">
+            <Flame className="w-4 h-4 text-white" />
           </div>
           <div>
-            <h1 className="text-base font-black tracking-tighter uppercase italic leading-none">Mesero Digital</h1>
-            <div className="flex items-center gap-1.5 mt-0.5">
+            <h1 className="text-sm font-black tracking-tighter uppercase italic leading-none">Mesero</h1>
+            <div className="flex items-center gap-1 mt-0.5">
               {online
-                ? <><Wifi className="w-3 h-3 text-emerald-500" /><span className="text-[9px] font-bold text-emerald-600 uppercase tracking-widest">En línea</span></>
-                : <><WifiOff className="w-3 h-3 text-red-400" /><span className="text-[9px] font-bold text-red-500 uppercase tracking-widest">Sin conexión</span></>
+                ? <><Wifi className="w-2.5 h-2.5 text-emerald-500" /><span className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest hidden sm:inline">En línea</span></>
+                : <><WifiOff className="w-2.5 h-2.5 text-red-400" /><span className="text-[8px] font-bold text-red-500 uppercase tracking-widest hidden sm:inline">Sin conexión</span></>
               }
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <NotificationBell
             notifications={notifications}
             unreadCount={unreadCount}
@@ -247,8 +247,8 @@ export default function WaiterPage() {
             onMarkRead={markRead}
             onClear={clear}
           />
-          <Button variant="ghost" size="icon" onClick={fetchTables} className="w-9 h-9 rounded-xl">
-            <RefreshCw className="w-4 h-4 text-zinc-400" />
+          <Button variant="ghost" size="icon" onClick={fetchTables} className="w-8 h-8 rounded-xl">
+            <RefreshCw className="w-3.5 h-3.5 text-zinc-400" />
           </Button>
           <UserNav />
         </div>
@@ -309,7 +309,7 @@ export default function WaiterPage() {
         <section>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.3em]">Mapa de Mesas</h2>
-            <div className="flex items-center gap-3 text-[9px] font-black uppercase tracking-widest text-zinc-400">
+            <div className="hidden sm:flex items-center gap-3 text-[9px] font-black uppercase tracking-widest text-zinc-400">
               {Object.entries(statusMeta).map(([k, v]) => (
                 <span key={k} className="flex items-center gap-1.5">
                   <span className={cn("w-2 h-2 rounded-full", v.dot)} />{v.label}

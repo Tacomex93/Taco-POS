@@ -35,19 +35,19 @@ export function UserNav() {
   if (!user) return null;
 
   return (
-    <div className="flex items-center gap-4 bg-white dark:bg-zinc-900 p-2 pr-4 rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800">
-      <div className="flex items-center gap-3 px-2">
-        <Avatar className="h-10 w-10 border-2 border-orange-600/20 shadow-lg">
+    <div className="flex items-center gap-2 bg-white dark:bg-zinc-900 p-1.5 pr-3 rounded-2xl shadow-sm border border-zinc-100 dark:border-zinc-800">
+      <div className="flex items-center gap-2 px-1">
+        <Avatar className="h-8 w-8 border-2 border-orange-600/20 shadow-sm shrink-0">
           <AvatarFallback className="bg-orange-600 text-white font-black text-xs uppercase">
             {user.full_name.substring(0, 2)}
           </AvatarFallback>
         </Avatar>
-        <div className="hidden lg:block text-left">
-          <div className="flex items-center gap-1.5">
+        <div className="hidden md:block text-left">
+          <div className="flex items-center gap-1">
              <p className="text-[9px] font-black uppercase text-zinc-400 tracking-widest">{rolesEspanol[user.role] || user.role}</p>
              {user.role === 'admin' && <ShieldCheck className="w-3 h-3 text-orange-600" />}
           </div>
-          <p className="text-sm font-black text-zinc-900 dark:text-zinc-50 leading-tight truncate max-w-[120px]">
+          <p className="text-xs font-black text-zinc-900 dark:text-zinc-50 leading-tight truncate max-w-[100px]">
             {user.full_name}
           </p>
         </div>
@@ -57,10 +57,10 @@ export function UserNav() {
         variant="ghost" 
         size="icon" 
         onClick={handleLogout}
-        className="h-10 w-10 rounded-xl hover:bg-red-500 hover:text-white transition-all group"
+        className="h-8 w-8 rounded-xl hover:bg-red-500 hover:text-white transition-all group"
         title="Cerrar Sesión"
       >
-        <LogOut className="w-5 h-5 group-hover:scale-110 transition-transform" />
+        <LogOut className="w-4 h-4 group-hover:scale-110 transition-transform" />
       </Button>
     </div>
   );
