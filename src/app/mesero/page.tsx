@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  Bell, ChefHat, Plus, Flame, CheckCircle2,
+  ChefHat, Plus, Flame, CheckCircle2,
   Loader2, Users, X, Minus, ShoppingBag, RefreshCw,
   UtensilsCrossed, Wifi, WifiOff
 } from "lucide-react";
@@ -13,6 +13,10 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Order, Product, TableStatus } from "@/lib/types";
 import { useOrdersRealtime } from "@/hooks/use-orders-realtime";
+import { useNotifications } from "@/hooks/use-notifications";
+import { NotificationBell } from "@/components/NotificationBell";
+import { useOfflineQueue } from "@/hooks/use-offline-queue";
+import { CloudOff } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type TableView = {
@@ -58,7 +62,9 @@ export default function WaiterPage() {
   const [submitting, setSubmitting] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string>('all');
 
-  // ── Auth ──────────────────────────────────────────────────────────────────
+  // ── Notifications ─────────────────────────────────────────────────────────
+  const { notifications, unreadCount, markAllRead, markRead, clear } = useNotifications({ role: 'mesero' });
+  const { isOnline } = useOfflineQueue();
   useEffect(() => {
     const s = localStorage.getItem('pos_employee_session');
     if (!s) { router.push('/login'); return; }
@@ -68,7 +74,16 @@ export default function WaiterPage() {
   }, [router]);
 
   // ── Fetch tables from open orders ─────────────────────────────────────────
+  const MESERO_CACHE = 'pos_mesero_tables';
   const fetchTables = useCallback(async () => {
+    if (!isOnline) {
+      try {
+        const cached = localStorage.getItem(MESERO_CACHE);
+        if (cached) { setTables(JSON.parse(cached)); setLoading(false); }
+      } catch {}
+      return;
+    }
+
     const { data: openOrders } = await supabase
       .from('orders')
       .select('*')
@@ -89,10 +104,12 @@ export default function WaiterPage() {
       return { id, status, diners: order.comensales ?? 1, order };
     });
 
+    try { localStorage.setItem(MESERO_CACHE, JSON.stringify(built)); } catch {}
     setTables(built);
     setReadyOrders((openOrders ?? []).filter(o => o.kitchen_status === 'ready') as (Order & { kitchen_status: string })[]);
     setLoading(false);
-  }, []);
+   
+  }, [isOnline]);
 
   const fetchProducts = useCallback(async () => {
     const { data } = await supabase.from('products').select('*').eq('is_active', true).order('category');
@@ -100,12 +117,17 @@ export default function WaiterPage() {
   }, []);
 
   useEffect(() => {
+    // Load from cache immediately, then fetch
+    try {
+      const cached = localStorage.getItem('pos_mesero_tables');
+      if (cached) { setTables(JSON.parse(cached)); setLoading(false); }
+    } catch {}
     fetchTables();
     fetchProducts();
   }, [fetchTables, fetchProducts]);
 
   // ── Realtime subscription ─────────────────────────────────────────────────
-  const { isConnected } = useOrdersRealtime({
+  useOrdersRealtime({
     channelName: 'mesero-orders',
     onchange: () => fetchTables(),
     onRefresh: fetchTables,
@@ -113,7 +135,7 @@ export default function WaiterPage() {
   });
 
   // Sync online indicator with realtime connection
-  useEffect(() => { setOnline(isConnected); }, [isConnected]);
+  useEffect(() => { setOnline(isOnline); }, [isOnline]);
 
   // ── Cart helpers ──────────────────────────────────────────────────────────
   const addToCart = (product: Product) => {
@@ -218,20 +240,26 @@ export default function WaiterPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {readyOrders.length > 0 && (
-            <div className="relative">
-              <Bell className="w-5 h-5 text-zinc-400" />
-              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-blue-500 rounded-full text-[8px] text-white font-black flex items-center justify-center animate-bounce">
-                {readyOrders.length}
-              </span>
-            </div>
-          )}
+          <NotificationBell
+            notifications={notifications}
+            unreadCount={unreadCount}
+            onMarkAllRead={markAllRead}
+            onMarkRead={markRead}
+            onClear={clear}
+          />
           <Button variant="ghost" size="icon" onClick={fetchTables} className="w-9 h-9 rounded-xl">
             <RefreshCw className="w-4 h-4 text-zinc-400" />
           </Button>
           <UserNav />
         </div>
       </header>
+
+      {/* ── Offline banner ── */}
+      {!isOnline && (
+        <div className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-[10px] font-black uppercase tracking-widest">
+          <CloudOff className="w-3.5 h-3.5" /> Sin conexión — mostrando datos en caché
+        </div>
+      )}
 
       <main className="flex-1 p-5 md:p-8 space-y-8 pb-6 overflow-y-auto">
 

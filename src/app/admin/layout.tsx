@@ -33,9 +33,15 @@ import {
 import { UserNav } from "@/components/UserNav";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useNotifications } from "@/hooks/use-notifications";
+import { NotificationBell } from "@/components/NotificationBell";
+import { useOfflineQueue } from "@/hooks/use-offline-queue";
+import { CloudOff } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { notifications, unreadCount, markAllRead, markRead, clear } = useNotifications({ role: 'admin' });
+  const { isOnline } = useOfflineQueue();
 
   // Flujo: Resumen → Operación en tiempo real → Cierre → Gestión → Config
   const groups = [
@@ -135,7 +141,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 <SidebarTrigger className="hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-2xl p-2 h-10 w-10 border border-zinc-100 dark:border-zinc-800 shadow-sm" />
                 <h2 className="text-xs font-black uppercase tracking-[0.3em] text-zinc-400 italic">{getPageTitle()}</h2>
              </div>
-             <UserNav />
+             <div className="flex items-center gap-3">
+               {!isOnline && (
+                 <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2.5 py-1 rounded-lg border border-amber-200 dark:border-amber-800">
+                   <CloudOff className="w-3 h-3" /> Sin conexión
+                 </div>
+               )}
+               <NotificationBell
+                 notifications={notifications}
+                 unreadCount={unreadCount}
+                 onMarkAllRead={markAllRead}
+                 onMarkRead={markRead}
+                 onClear={clear}
+               />
+               <UserNav />
+             </div>
           </header>
           <main className="flex-1 overflow-y-auto bg-[#f8f9fc] dark:bg-zinc-950">
             {children}
