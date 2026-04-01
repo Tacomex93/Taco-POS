@@ -69,20 +69,22 @@ export default function LoginPage() {
       }
 
       localStorage.setItem('pos_employee_session', JSON.stringify(data));
-      // Cookie para el middleware — Lax permite que funcione en redirects, Secure en HTTPS
       const isSecure = window.location.protocol === 'https:';
       document.cookie = `pos_session=1; path=/; max-age=${60 * 60 * 12}; SameSite=Lax${isSecure ? '; Secure' : ''}`;
 
       const params = new URLSearchParams(window.location.search);
       const redirect = params.get('redirect');
       const role = data.role as string;
-      if (redirect && redirect !== '/login') {
-        router.push(redirect);
-      } else if (role === 'admin') router.push('/admin/dashboard');
-      else if (role === 'cajero') router.push('/cajero');
-      else if (role === 'mesero') router.push('/mesero');
-      else if (role === 'cocina') router.push('/cocina');
-      else router.push('/');
+
+      let dest = '/admin/dashboard';
+      if (redirect && redirect !== '/login') dest = redirect;
+      else if (role === 'cajero') dest = '/cajero';
+      else if (role === 'mesero') dest = '/mesero';
+      else if (role === 'cocina') dest = '/cocina';
+      else if (role !== 'admin') dest = '/';
+
+      // Hard navigation ensures cookie is set before the next page loads
+      window.location.href = dest;
 
     } catch {
       setError('Error de conexión con el servidor.');
