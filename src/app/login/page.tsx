@@ -69,8 +69,9 @@ export default function LoginPage() {
       }
 
       localStorage.setItem('pos_employee_session', JSON.stringify(data));
-      // Cookie para el middleware (sin datos sensibles, solo señal de sesión)
-      document.cookie = `pos_session=1; path=/; max-age=${60 * 60 * 12}; SameSite=Strict`;
+      // Cookie para el middleware — Lax permite que funcione en redirects, Secure en HTTPS
+      const isSecure = window.location.protocol === 'https:';
+      document.cookie = `pos_session=1; path=/; max-age=${60 * 60 * 12}; SameSite=Lax${isSecure ? '; Secure' : ''}`;
 
       const params = new URLSearchParams(window.location.search);
       const redirect = params.get('redirect');

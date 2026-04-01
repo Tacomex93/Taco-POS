@@ -21,7 +21,7 @@ export function UserNav() {
   const handleLogout = () => {
     localStorage.removeItem('pos_employee_session');
     // Expire the middleware cookie
-    document.cookie = 'pos_session=; path=/; max-age=0; SameSite=Strict';
+    document.cookie = 'pos_session=; path=/; max-age=0; SameSite=Lax';
     router.push('/login');
   };
 
