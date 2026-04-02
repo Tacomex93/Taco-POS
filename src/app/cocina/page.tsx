@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import {
   Loader2, ChefHat, Clock, Flame, CheckCircle2,
   Truck, Bell, RefreshCw, LogOut, Volume2, Wifi, WifiOff, CloudOff,
+  Pause, Play, Search,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { KitchenStatus } from '@/lib/types';
@@ -35,9 +36,148 @@ const STATUS: Record<KitchenStatus, {
 
 const COLUMNS: KitchenStatus[] = ['pending', 'preparing', 'ready'];
 
-const ageMin = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+const ageSeconds = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
 const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 
+/** Format elapsed seconds as MM:SS (or H:MM:SS if >= 1 hour) */
+function fmtElapsed(secs: number): string {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+/** Color class based on elapsed minutes */
+function timerColor(secs: number): string {
+  const m = secs / 60;
+  if (m >= 15) return 'text-red-500';
+  if (m >= 8)  return 'text-orange-500';
+  return 'text-emerald-500';
+}
+
+// ── Live timer hook ────────────────────────────────────────────────────────
+function useLiveTimer(createdAt: string, paused: boolean) {
+  const [elapsed, setElapsed] = useState(() => ageSeconds(createdAt));
+  useEffect(() => {
+    if (paused) return;
+    const id = setInterval(() => setElapsed(ageSeconds(createdAt)), 1000);
+    return () => clearInterval(id);
+  }, [createdAt, paused]);
+  return elapsed;
+}
+
+// ── Per-card component ─────────────────────────────────────────────────────
+function OrderCard({
+  order, status, updating, isOnline, paused, onAdvance, onTogglePause,
+}: {
+  order: KitchenOrder;
+  status: KitchenStatus;
+  updating: boolean;
+  isOnline: boolean;
+  paused: boolean;
+  onAdvance: () => void;
+  onTogglePause: () => void;
+}) {
+  const cfg = STATUS[status];
+  const Icon = cfg.icon;
+  const elapsed = useLiveTimer(order.created_at, paused);
+  const isUrgent = elapsed / 60 >= 15 && status !== 'ready';
+
+  return (
+    <div className={cn(
+      'rounded-2xl border-2 overflow-hidden transition-all',
+      paused ? 'border-yellow-400 dark:border-yellow-500' : cfg.border,
+      cfg.bg,
+      isUrgent && !paused && 'border-red-500 shadow-lg shadow-red-900/30',
+      updating && 'opacity-70',
+    )}>
+      {/* Paused badge */}
+      {paused && (
+        <div className="flex items-center justify-center gap-1.5 py-1 bg-yellow-400/20 border-b border-yellow-400/40">
+          <Pause className="w-3 h-3 text-yellow-400" />
+          <span className="text-[9px] font-black uppercase tracking-widest text-yellow-400">En pausa</span>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-black/10 dark:border-white/5">
+        <div className="flex items-center gap-2">
+          <span className="font-black text-xl text-zinc-900 dark:text-white">Mesa {order.table_id}</span>
+          <span className="text-[10px] font-bold text-zinc-500">{order.comensales}p</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {isUrgent && !paused && (
+            <span className="text-[9px] font-black uppercase tracking-widest text-red-500 animate-pulse">¡Urgente!</span>
+          )}
+          <span className={cn('flex items-center gap-1 text-[10px] font-black tabular-nums',
+            paused ? 'text-yellow-400' : timerColor(elapsed))}>
+            <Clock className="w-3 h-3" />
+            {fmtElapsed(elapsed)}
+          </span>
+          <span className="text-[9px] text-zinc-400 hidden sm:inline">{fmtTime(order.created_at)}</span>
+        </div>
+      </div>
+
+      <div className="px-4 py-3 space-y-1.5">
+        {order.order_items.map(item => (
+          <div key={item.id} className="flex items-baseline justify-between gap-2">
+            <span className="font-bold text-sm text-zinc-900 dark:text-white leading-tight">{item.product_name}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              {item.seat_number != null && (
+                <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">C{item.seat_number}</span>
+              )}
+              <span className="font-black text-lg text-zinc-900 dark:text-white tabular-nums">×{item.quantity}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Action buttons */}
+      {(cfg.next || (status === 'pending' || status === 'preparing')) && (
+        <div className={cn('px-3 pb-3', cfg.next ? 'flex gap-2' : '')}>
+          {/* Pause/Resume button — only for pending and preparing */}
+          {(status === 'pending' || status === 'preparing') && (
+            <button
+              type="button"
+              onClick={onTogglePause}
+              className={cn(
+                'h-12 rounded-xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-1.5',
+                cfg.next ? 'w-12 shrink-0' : 'w-full',
+                paused
+                  ? 'bg-yellow-400 hover:bg-yellow-300 text-black'
+                  : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300',
+              )}
+            >
+              {paused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+              {!cfg.next && (paused ? 'Reanudar' : 'Pausar')}
+            </button>
+          )}
+
+          {cfg.next && (
+            <button
+              type="button"
+              onClick={onAdvance}
+              disabled={updating}
+              className={cn(
+                'flex-1 h-12 rounded-xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2',
+                status === 'pending' ? 'bg-red-500 hover:bg-red-400 text-white'
+                  : status === 'preparing' ? 'bg-orange-500 hover:bg-orange-400 text-white'
+                  : 'bg-emerald-500 hover:bg-emerald-400 text-white',
+              )}
+            >
+              {updating
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : <><Icon className="w-4 h-4" /> {paused ? 'Reanudar' : cfg.action}{!isOnline && ' (offline)'}</>
+              }
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────
 export default function CocinaPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
@@ -46,6 +186,8 @@ export default function CocinaPage() {
   const [employee, setEmployee] = useState<{ full_name: string } | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [mobileCol, setMobileCol] = useState<KitchenStatus>('pending');
+  const [tableFilter, setTableFilter] = useState('');
+  const [pausedIds, setPausedIds] = useState<Set<string>>(new Set());
   const prevPendingIds = useRef<Set<string>>(new Set());
   const audioCtx = useRef<AudioContext | null>(null);
 
@@ -85,7 +227,6 @@ export default function CocinaPage() {
   // ── Fetch & cache ─────────────────────────────────────────────────────────
   const fetchOrders = useCallback(async () => {
     if (!isOnline) {
-      // Offline: serve from cache
       const cached = getCachedOrders();
       if (cached.length > 0) {
         setOrders(cached as KitchenOrder[]);
@@ -102,7 +243,6 @@ export default function CocinaPage() {
       .order('created_at', { ascending: true });
 
     if (error || !data) {
-      // Fallback to cache on network error
       const cached = getCachedOrders();
       setOrders(cached as KitchenOrder[]);
       setLoading(false);
@@ -111,22 +251,19 @@ export default function CocinaPage() {
 
     const rows = data as KitchenOrder[];
 
-    // Detect new pending → beep
     const newPendingIds = new Set(rows.filter(o => o.kitchen_status === 'pending').map(o => o.id));
     const hasNew = [...newPendingIds].some(id => !prevPendingIds.current.has(id));
     if (hasNew && prevPendingIds.current.size > 0) {
       playBeep();
-      setMobileCol('pending'); // auto-switch to pending tab on mobile
+      setMobileCol('pending');
     }
     prevPendingIds.current = newPendingIds;
 
-    // Persist to cache
     cacheOrders(rows);
     setOrders(rows);
     setLoading(false);
   }, [isOnline, getCachedOrders, cacheOrders, playBeep]);
 
-  // Initial load — use cache immediately, then fetch
   useEffect(() => {
     const cached = getCachedOrders();
     if (cached.length > 0) {
@@ -137,7 +274,6 @@ export default function CocinaPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync queue when coming back online
   useEffect(() => {
     if (isOnline && pendingCount > 0) {
       syncQueue().then(() => fetchOrders());
@@ -149,7 +285,7 @@ export default function CocinaPage() {
     channelName: 'cocina-orders',
     onchange: () => fetchOrders(),
     onRefresh: fetchOrders,
-    pollInterval: 15_000,
+    pollInterval: 5_000,
   });
 
   // ── Advance order status ──────────────────────────────────────────────────
@@ -158,7 +294,9 @@ export default function CocinaPage() {
     if (!cfg.next) return;
     setUpdating(order.id);
 
-    // Optimistic update locally
+    // Clear pause when advancing
+    setPausedIds(prev => { const n = new Set(prev); n.delete(order.id); return n; });
+
     const updated = applyLocalUpdate(order.id, cfg.next);
     setOrders(updated.filter(o =>
       COLUMNS.includes(o.kitchen_status as KitchenStatus)
@@ -171,20 +309,38 @@ export default function CocinaPage() {
         .eq('id', order.id);
 
       if (error) {
-        // Failed online — enqueue for retry
         enqueue(order.id, cfg.next);
       } else {
         await fetchOrders();
       }
     } else {
-      // Offline — enqueue for later sync
       enqueue(order.id, cfg.next);
     }
 
     setUpdating(null);
   };
 
+  const togglePause = (id: string) => {
+    setPausedIds(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) { n.delete(id); } else { n.add(id); }
+      return n;
+    });
+  };
+
+  // ── Filtering ─────────────────────────────────────────────────────────────
+  const filterTrim = tableFilter.trim().toLowerCase();
+  const filteredOrders = filterTrim
+    ? orders.filter(o => String(o.table_id).toLowerCase().includes(filterTrim))
+    : orders;
+
   const grouped = COLUMNS.reduce((acc, s) => {
+    acc[s] = filteredOrders.filter(o => o.kitchen_status === s);
+    return acc;
+  }, {} as Record<KitchenStatus, KitchenOrder[]>);
+
+  // Unfiltered counts for stats bar
+  const rawGrouped = COLUMNS.reduce((acc, s) => {
     acc[s] = orders.filter(o => o.kitchen_status === s);
     return acc;
   }, {} as Record<KitchenStatus, KitchenOrder[]>);
@@ -222,7 +378,6 @@ export default function CocinaPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Connection status */}
           {isOnline
             ? isConnected
               ? <Wifi className="w-3.5 h-3.5 text-emerald-500" aria-label="Tiempo real activo" />
@@ -230,7 +385,6 @@ export default function CocinaPage() {
             : <WifiOff className="w-3.5 h-3.5 text-amber-400 animate-pulse" aria-label="Sin internet" />
           }
 
-          {/* Notification bell */}
           <NotificationBell
             notifications={notifications}
             unreadCount={unreadCount}
@@ -268,7 +422,7 @@ export default function CocinaPage() {
       <div className="shrink-0 flex items-center gap-4 px-5 py-2 bg-zinc-900 border-b border-zinc-800">
         {COLUMNS.map(s => {
           const cfg = STATUS[s];
-          const count = grouped[s]?.length ?? 0;
+          const count = rawGrouped[s]?.length ?? 0;
           return (
             <div key={s} className="flex items-center gap-2">
               <span className={cn('w-2 h-2 rounded-full', cfg.badge.split(' ')[0])} />
@@ -280,12 +434,26 @@ export default function CocinaPage() {
             </div>
           );
         })}
-        <div className="ml-auto text-[10px] font-semibold text-zinc-500">
-          {new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+
+        {/* Table filter */}
+        <div className="ml-auto flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-500 pointer-events-none" />
+            <input
+              type="text"
+              value={tableFilter}
+              onChange={e => setTableFilter(e.target.value)}
+              placeholder="Mesa…"
+              className="h-7 w-24 pl-7 pr-2 rounded-lg bg-zinc-800 border border-zinc-700 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500 transition-colors"
+            />
+          </div>
+          <div className="text-[10px] font-semibold text-zinc-500">
+            {new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+          </div>
         </div>
       </div>
 
-      {/* ── Kanban — scrollable horizontally on mobile, 3 cols on desktop ── */}
+      {/* ── Kanban ── */}
       {loading ? (
         <div className="flex-1 flex items-center justify-center opacity-30">
           <Loader2 className="h-12 w-12 animate-spin text-orange-600" />
@@ -296,7 +464,7 @@ export default function CocinaPage() {
           <div className="md:hidden shrink-0 flex border-b border-zinc-800 bg-zinc-900">
             {COLUMNS.map(s => {
               const cfg = STATUS[s];
-              const count = grouped[s]?.length ?? 0;
+              const count = rawGrouped[s]?.length ?? 0;
               return (
                 <button
                   key={s}
@@ -329,7 +497,6 @@ export default function CocinaPage() {
             return (
               <div key={status} className={cn(
                 'flex flex-col overflow-hidden',
-                // On mobile show only the selected column
                 'md:flex',
                 mobileCol === status ? 'flex' : 'hidden md:flex'
               )}>
@@ -351,73 +518,23 @@ export default function CocinaPage() {
                   {colOrders.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-16 opacity-20">
                       <Icon className="w-10 h-10 mb-3" />
-                      <p className="text-[10px] font-black uppercase tracking-widest">Sin pedidos</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest">
+                        {filterTrim ? 'Sin resultados' : 'Sin pedidos'}
+                      </p>
                     </div>
                   )}
-                  {colOrders.map(order => {
-                    const age = ageMin(order.created_at);
-                    const isUrgent = age >= 15 && status !== 'ready';
-                    const isPending = updating === order.id;
-                    return (
-                      <div key={order.id}
-                        className={cn('rounded-2xl border-2 overflow-hidden transition-all',
-                          cfg.border, cfg.bg,
-                          isUrgent && 'border-red-500 shadow-lg shadow-red-900/30',
-                          isPending && 'opacity-70')}>
-                        <div className="flex items-center justify-between px-4 py-2.5 border-b border-black/10 dark:border-white/5">
-                          <div className="flex items-center gap-2">
-                            <span className="font-black text-xl text-zinc-900 dark:text-white">Mesa {order.table_id}</span>
-                            <span className="text-[10px] font-bold text-zinc-500">{order.comensales}p</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {isUrgent && (
-                              <span className="text-[9px] font-black uppercase tracking-widest text-red-500 animate-pulse">¡Urgente!</span>
-                            )}
-                            <span className={cn('flex items-center gap-1 text-[10px] font-black',
-                              age >= 15 ? 'text-red-500' : age >= 8 ? 'text-orange-500' : 'text-zinc-400')}>
-                              <Clock className="w-3 h-3" /> {age}m
-                            </span>
-                            <span className="text-[9px] text-zinc-400 hidden sm:inline">{fmtTime(order.created_at)}</span>
-                          </div>
-                        </div>
-
-                        <div className="px-4 py-3 space-y-1.5">
-                          {order.order_items.map(item => (
-                            <div key={item.id} className="flex items-baseline justify-between gap-2">
-                              <span className="font-bold text-sm text-zinc-900 dark:text-white leading-tight">{item.product_name}</span>
-                              <div className="flex items-center gap-2 shrink-0">
-                                {item.seat_number != null && (
-                                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">C{item.seat_number}</span>
-                                )}
-                                <span className="font-black text-lg text-zinc-900 dark:text-white tabular-nums">×{item.quantity}</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-
-                        {cfg.next && (
-                          <div className="px-3 pb-3">
-                            <button
-                              type="button"
-                              onClick={() => advance(order)}
-                              disabled={isPending}
-                              className={cn(
-                                'w-full h-12 rounded-xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2',
-                                status === 'pending' ? 'bg-red-500 hover:bg-red-400 text-white'
-                                  : status === 'preparing' ? 'bg-orange-500 hover:bg-orange-400 text-white'
-                                  : 'bg-emerald-500 hover:bg-emerald-400 text-white'
-                              )}
-                            >
-                              {isPending
-                                ? <Loader2 className="w-4 h-4 animate-spin" />
-                                : <><Icon className="w-4 h-4" /> {cfg.action}{!isOnline && ' (offline)'}</>
-                              }
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                  {colOrders.map(order => (
+                    <OrderCard
+                      key={order.id}
+                      order={order}
+                      status={status}
+                      updating={updating === order.id}
+                      isOnline={isOnline}
+                      paused={pausedIds.has(order.id)}
+                      onAdvance={() => advance(order)}
+                      onTogglePause={() => togglePause(order.id)}
+                    />
+                  ))}
                 </div>
               </div>
             );

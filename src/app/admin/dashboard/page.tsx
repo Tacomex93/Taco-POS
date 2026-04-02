@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import Link from 'next/link';
 import {
   fetchLast7DaysSeries,
   fetchTodayOrderStats,
   fetchTopProductsByQuantity,
 } from '@/lib/admin-data';
+import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -26,7 +27,10 @@ import {
   CalendarDays,
   Sparkles,
   ArrowUpRight,
-  Loader2
+  Loader2,
+  AlertTriangle,
+  Package,
+  LayoutGrid,
 } from "lucide-react";
 import { 
   Bar, 
@@ -43,6 +47,7 @@ import {
   ChartTooltip, 
   ChartTooltipContent 
 } from "@/components/ui/chart";
+import { useOrdersRealtime } from "@/hooks/use-orders-realtime";
 
 const DEMO_CHART = [
   { day: 'Lun', sales: 4500, orders: 42 },
@@ -84,6 +89,73 @@ export default function AdminDashboard() {
   const [series, setSeries] = useState<{ day: string; sales: number; orders: number }[]>([]);
   const [topItems, setTopItems] = useState<{ name: string; units: number; revenue: number }[]>([]);
 
+  // Live tables
+  type LiveTable = { id: number; status: 'available' | 'occupied' | 'ready'; diners: number };
+  const [liveTables, setLiveTables] = useState<LiveTable[]>([]);
+
+  // Hourly sales
+  const [hourlySales, setHourlySales] = useState<{ hour: string; sales: number }[]>([]);
+
+  // Low inventory
+  type LowItem = { id: string; name: string; quantity: number; min_quantity: number; unit: string };
+  const [lowInventory, setLowInventory] = useState<LowItem[]>([]);
+
+  const fetchLiveTables = useCallback(async () => {
+    const { data } = await supabase
+      .from('orders')
+      .select('table_id, comensales, kitchen_status')
+      .eq('status', 'abierta');
+    const occupied = new Map<number, { diners: number; ks: string }>();
+    (data ?? []).forEach((o: { table_id: string; comensales: number; kitchen_status: string }) => {
+      const tid = parseInt(o.table_id);
+      if (!isNaN(tid)) occupied.set(tid, { diners: o.comensales, ks: o.kitchen_status });
+    });
+    const tables: LiveTable[] = Array.from({ length: 20 }, (_, i) => {
+      const id = i + 1;
+      const info = occupied.get(id);
+      if (!info) return { id, status: 'available', diners: 0 };
+      return { id, status: info.ks === 'ready' ? 'ready' : 'occupied', diners: info.diners };
+    });
+    setLiveTables(tables);
+  }, []);
+
+  const fetchHourlySales = useCallback(async () => {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const { data } = await supabase
+      .from('orders')
+      .select('total, created_at')
+      .eq('status', 'pagada')
+      .gte('created_at', start.toISOString());
+    const byHour: Record<number, number> = {};
+    (data ?? []).forEach((o: { total: number; created_at: string }) => {
+      const h = new Date(o.created_at).getHours();
+      byHour[h] = (byHour[h] ?? 0) + Number(o.total);
+    });
+    const hourly = Array.from({ length: 24 }, (_, h) => ({
+      hour: `${String(h).padStart(2, '0')}h`,
+      sales: byHour[h] ?? 0,
+    })).filter((_, h) => h >= 7 && h <= 23);
+    setHourlySales(hourly);
+  }, []);
+
+  const fetchLowInventory = useCallback(async () => {
+    // Manual filter since lte on computed isn't straightforward — skip first query
+    await supabase
+      .from('inventory')
+      .select('id')
+      .eq('is_active', true)
+      .limit(1); // no-op to keep structure
+    // Manual filter since lte on computed isn't straightforward
+    const { data: inv } = await supabase
+      .from('inventory')
+      .select('id, name, quantity, min_quantity, unit')
+      .eq('is_active', true)
+      .order('quantity', { ascending: true })
+      .limit(20);
+    const low = (inv ?? []).filter((i: LowItem) => Number(i.quantity) <= Number(i.min_quantity)).slice(0, 5);
+    setLowInventory(low as LowItem[]);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -103,12 +175,19 @@ export default function AdminDashboard() {
       });
       setSeries(w.series.length ? w.series : DEMO_CHART);
       setTopItems(t.items);
+      // Also load live widgets on initial mount
+      await Promise.all([fetchLiveTables(), fetchHourlySales(), fetchLowInventory()]);
       setLoading(false);
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return () => { cancelled = true; };
+  }, [fetchLiveTables, fetchHourlySales, fetchLowInventory]);
+
+  useOrdersRealtime({
+    channelName: 'admin-dashboard',
+    onchange: () => { fetchLiveTables(); fetchHourlySales(); },
+    onRefresh: () => { fetchLiveTables(); fetchHourlySales(); },
+    pollInterval: 30_000,
+  });
 
   const todayLabel = useMemo(
     () =>
@@ -302,6 +381,105 @@ export default function AdminDashboard() {
               </CardContent>
             </Card>
           ))}
+        </section>
+
+        {/* Live tables + Low inventory */}
+        <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {/* Live table map */}
+          <Card className="border border-zinc-200/80 bg-white/90 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/80 lg:col-span-2 rounded-[2rem]">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
+              <div>
+                <CardTitle className="text-base font-black flex items-center gap-2">
+                  <LayoutGrid className="w-4 h-4 text-orange-500" /> Mesas en tiempo real
+                </CardTitle>
+                <CardDescription className="text-[10px] font-bold uppercase tracking-widest mt-0.5">
+                  {liveTables.filter(t => t.status !== 'available').length} ocupadas · {liveTables.filter(t => t.status === 'ready').length} listas
+                </CardDescription>
+              </div>
+              <Link href="/admin/mesas" className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'rounded-xl text-[10px] font-black uppercase text-zinc-400')}>
+                Ver todas <ChevronRight className="w-3 h-3 ml-1" />
+              </Link>
+            </CardHeader>
+            <CardContent className="p-4">
+              <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
+                {liveTables.map(t => (
+                  <div key={t.id} className={cn(
+                    'aspect-square rounded-xl flex flex-col items-center justify-center text-center transition-all',
+                    t.status === 'available' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'
+                      : t.status === 'ready' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-2 ring-blue-400 animate-pulse'
+                      : 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300'
+                  )}>
+                    <span className="text-[10px] font-black leading-none">{t.id}</span>
+                    {t.status !== 'available' && <span className="text-[8px] font-bold mt-0.5">{t.diners}p</span>}
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-4 mt-3 text-[9px] font-black uppercase tracking-widest text-zinc-400">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-zinc-300" />Libre</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-400" />Ocupada</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400" />Lista</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Low inventory */}
+          <Card className="border border-zinc-200/80 bg-white/90 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/80 rounded-[2rem]">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
+              <div>
+                <CardTitle className="text-base font-black flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-500" /> Stock bajo
+                </CardTitle>
+                <CardDescription className="text-[10px] font-bold uppercase tracking-widest mt-0.5">
+                  Insumos por debajo del mínimo
+                </CardDescription>
+              </div>
+              <Link href="/admin/inventario" className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'rounded-xl text-[10px] font-black uppercase text-zinc-400')}>
+                Ver <ChevronRight className="w-3 h-3 ml-1" />
+              </Link>
+            </CardHeader>
+            <CardContent className="p-4 space-y-2">
+              {lowInventory.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-6 opacity-30">
+                  <Package className="w-8 h-8 mb-2" />
+                  <p className="text-xs font-bold">Stock OK</p>
+                </div>
+              ) : lowInventory.map(item => (
+                <div key={item.id} className="flex items-center justify-between rounded-xl bg-amber-50 dark:bg-amber-950/20 px-3 py-2.5 border border-amber-100 dark:border-amber-900/30">
+                  <div className="min-w-0">
+                    <p className="text-xs font-black text-zinc-900 dark:text-white truncate">{item.name}</p>
+                    <p className="text-[9px] font-bold text-zinc-400">Mín: {item.min_quantity} {item.unit}</p>
+                  </div>
+                  <Badge className="bg-amber-500 text-white border-none font-black text-[9px] shrink-0 ml-2">
+                    {Number(item.quantity).toFixed(1)} {item.unit}
+                  </Badge>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </section>
+
+        {/* Hourly sales chart */}
+        <section>
+          <Card className="border border-zinc-200/80 bg-white/90 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/80 rounded-[2rem]">
+            <CardHeader className="border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
+              <CardTitle className="text-base font-black flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-emerald-500" /> Ventas por hora — hoy
+              </CardTitle>
+              <CardDescription className="text-[10px] font-bold uppercase tracking-widest mt-0.5">
+                Órdenes pagadas agrupadas por hora del día
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6">
+              <ChartContainer config={{ sales: { label: 'Ventas', color: '#10b981' } }} className="h-[180px] w-full">
+                <BarChart data={hourlySales} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="4 4" vertical={false} className="stroke-zinc-200/80 dark:stroke-zinc-800" />
+                  <XAxis dataKey="hour" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 700 }} />
+                  <ChartTooltip content={<ChartTooltipContent className="rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-800 dark:bg-zinc-950" />} />
+                  <Bar dataKey="sales" radius={[6, 6, 0, 0]} fill="#10b981" fillOpacity={0.85} />
+                </BarChart>
+              </ChartContainer>
+            </CardContent>
+          </Card>
         </section>
 
         {/* Charts */}

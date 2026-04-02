@@ -25,11 +25,20 @@ import {
   LogOut,
   Settings,
   ClipboardList,
-  Store
+  Store,
+  History
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { usePathname } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+
+type RecentTransaction = {
+  id: string;
+  table_id: string;
+  total: number;
+  paid_at: string | null;
+};
 
 interface CajeroSidebarProps {
   onCategorySelect?: (category: string) => void;
@@ -43,6 +52,7 @@ export function CajeroSidebar({ onCategorySelect, activeCategory, orderTotal = 0
   const pathname = usePathname();
   const isPosView = pathname === "/cajero";
   const [currentEmployee, setCurrentEmployee] = React.useState<{ full_name: string; role: string } | null>(null);
+  const [recentTransactions, setRecentTransactions] = React.useState<RecentTransaction[]>([]);
 
   React.useEffect(() => {
     const sessionStr = localStorage.getItem('pos_employee_session');
@@ -50,6 +60,23 @@ export function CajeroSidebar({ onCategorySelect, activeCategory, orderTotal = 0
       setCurrentEmployee(JSON.parse(sessionStr));
     }
   }, []);
+
+  const fetchRecentTransactions = React.useCallback(async () => {
+    const { data } = await supabase
+      .from('orders')
+      .select('id, table_id, total, paid_at')
+      .eq('status', 'pagada')
+      .order('paid_at', { ascending: false })
+      .limit(5);
+    if (data) setRecentTransactions(data as RecentTransaction[]);
+  }, []);
+
+  React.useEffect(() => {
+    if (!isPosView) return;
+    fetchRecentTransactions();
+    const interval = setInterval(fetchRecentTransactions, 30_000);
+    return () => clearInterval(interval);
+  }, [isPosView, fetchRecentTransactions]);
   
   const categories = [
     { name: "Todos 🌮", id: "all", icon: Utensils },
@@ -152,6 +179,30 @@ export function CajeroSidebar({ onCategorySelect, activeCategory, orderTotal = 0
                   </SidebarMenuItem>
                 ))}
               </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
+        {isPosView && recentTransactions.length > 0 && (
+          <SidebarGroup className="mt-4">
+            <SidebarGroupLabel className={cn("px-4 text-[10px] font-black uppercase tracking-widest text-zinc-400 flex items-center gap-1.5", state === "collapsed" && "hidden")}>
+              <History className="w-3 h-3" /> Últimas ventas
+            </SidebarGroupLabel>
+            <SidebarGroupContent className={cn(state === "collapsed" && "hidden")}>
+              <div className="px-2 space-y-1 mt-1">
+                {recentTransactions.map((tx) => {
+                  const time = tx.paid_at ? new Date(tx.paid_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '—';
+                  return (
+                    <div key={tx.id} className="flex items-center justify-between px-3 py-2 rounded-xl bg-zinc-50 dark:bg-zinc-800/60">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">M{tx.table_id}</span>
+                        <span className="text-[9px] font-semibold text-zinc-400">{time}</span>
+                      </div>
+                      <span className="text-[11px] font-black text-emerald-600">${Number(tx.total).toFixed(2)}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </SidebarGroupContent>
           </SidebarGroup>
         )}

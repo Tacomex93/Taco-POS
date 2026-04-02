@@ -74,6 +74,9 @@ export default function CashierPage() {
   const [cashReceived, setCashReceived] = useState('');
   const [paying, setPaying] = useState(false);
   const [paidSuccess, setPaidSuccess] = useState(false);
+  const [tipPercent, setTipPercent] = useState<number | 'custom'>(0);
+  const [customTip, setCustomTip] = useState('');
+  const [paidOrderSnapshot, setPaidOrderSnapshot] = useState<{ tableId: string; items: typeof orderItems; subtotal: number; tip: number; method: PayMethod; paidAt: string } | null>(null);
 
   // Notifications + offline
   const { notifications, unreadCount, markAllRead, markRead, clear } = useNotifications({ role: 'cajero' });
@@ -107,7 +110,7 @@ export default function CashierPage() {
   useEffect(() => { fetchOrders(); fetchProducts(); }, [fetchOrders, fetchProducts]);
 
   // Realtime: refresh orders on any change
-  useOrdersRealtime({ channelName: 'cajero-live', onchange: () => fetchOrders(), onRefresh: fetchOrders, pollInterval: 20_000 });
+  useOrdersRealtime({ channelName: 'cajero-live', onchange: () => fetchOrders(), onRefresh: fetchOrders, pollInterval: 5_000 });
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const selectedOrder = liveOrders.find(o => o.id === selectedOrderId) ?? null;
@@ -128,12 +131,15 @@ export default function CashierPage() {
   const orderItems = selectedOrder?.order_items ?? [];
   const orderTotal = orderItems.reduce((a, i) => a + Number(i.price) * i.quantity, 0);
   const seatOrderTotal = (s: number) => orderItems.filter(i => (i.seat_number ?? 0) === s).reduce((a, i) => a + Number(i.price) * i.quantity, 0);
-  const payTotal = payingSeat !== null ? seatOrderTotal(payingSeat) : orderTotal;
+  const paySubtotal = payingSeat !== null ? seatOrderTotal(payingSeat) : orderTotal;
+  const tipAmount = tipPercent === 'custom'
+    ? (parseFloat(customTip || '0'))
+    : (paySubtotal * tipPercent) / 100;
+  const payTotal = paySubtotal + tipAmount;
   const change = parseFloat(cashReceived || '0') - payTotal;
 
   // ── Table grid helpers ───────────────────────────────────────────────────
   const TABLE_COUNT = 20;
-  const occupiedTableIds = new Set(liveOrders.map(o => o.table_id));
 
   const handleTableClick = (tableId: string) => {
     const existing = liveOrders.find(o => o.table_id === tableId);
@@ -226,7 +232,9 @@ export default function CashierPage() {
 
   // ── Pay ──────────────────────────────────────────────────────────────────
   const openPayDialog = (seat: number | null) => {
-    setPayingSeat(seat); setPayMethod('efectivo'); setCashReceived(''); setPayDialogOpen(true);
+    setPayingSeat(seat); setPayMethod('efectivo'); setCashReceived('');
+    setTipPercent(0); setCustomTip(''); setPaidOrderSnapshot(null);
+    setPayDialogOpen(true);
   };
 
   const handlePay = async () => {
@@ -239,14 +247,21 @@ export default function CashierPage() {
       }).eq('id', selectedOrder.id);
       if (error) throw error;
 
+      const paidAt = new Date().toISOString();
+      setPaidOrderSnapshot({
+        tableId: selectedOrder.table_id,
+        items: orderItems,
+        subtotal: paySubtotal,
+        tip: tipAmount,
+        method: payMethod,
+        paidAt,
+      });
       setPaidSuccess(true);
       setTimeout(async () => {
-        setPaidSuccess(false);
-        setPayDialogOpen(false);
         setSelectedOrderId(null);
         setCashReceived('');
         await fetchOrders();
-      }, 1600);
+      }, 0);
     } catch (e) { alert('Error al cobrar: ' + String(e)); }
     setPaying(false);
   };
@@ -544,7 +559,10 @@ export default function CashierPage() {
       </Dialog>
 
       {/* Pay dialog */}
-      <Dialog open={payDialogOpen} onOpenChange={setPayDialogOpen}>
+      <Dialog open={payDialogOpen} onOpenChange={(open) => {
+        if (!open) { setPaidSuccess(false); setPaidOrderSnapshot(null); }
+        setPayDialogOpen(open);
+      }}>
         <DialogContent className="max-w-sm rounded-3xl p-7 bg-white dark:bg-zinc-900 border-none shadow-2xl">
           <DialogHeader className="space-y-2">
             <div className="w-12 h-12 bg-emerald-600 rounded-2xl flex items-center justify-center text-white mx-auto shadow-lg">
@@ -554,14 +572,44 @@ export default function CashierPage() {
               {paidSuccess ? '¡Cobrado!' : `Cobrar · Mesa ${selectedOrder?.table_id}`}
             </DialogTitle>
             <DialogDescription className="text-center font-bold text-[10px] uppercase tracking-widest text-zinc-400">
-              Total: ${payTotal.toFixed(2)}
+              {paidSuccess ? 'Pago registrado exitosamente' : `Subtotal: $${paySubtotal.toFixed(2)}`}
             </DialogDescription>
           </DialogHeader>
 
           {paidSuccess ? (
-            <div className="flex flex-col items-center py-6 gap-3">
+            <div className="flex flex-col items-center py-4 gap-4">
               <CheckCircle2 className="w-16 h-16 text-emerald-500" />
               <p className="font-black text-emerald-600 uppercase tracking-widest text-sm">Pago registrado</p>
+              {paidOrderSnapshot && (
+                <>
+                  <div className="w-full rounded-2xl bg-zinc-50 dark:bg-zinc-800 px-4 py-3 space-y-1.5 text-sm">
+                    <div className="flex justify-between text-zinc-500">
+                      <span className="text-[10px] font-black uppercase tracking-widest">Subtotal</span>
+                      <span className="font-bold">${paidOrderSnapshot.subtotal.toFixed(2)}</span>
+                    </div>
+                    {paidOrderSnapshot.tip > 0 && (
+                      <div className="flex justify-between text-zinc-500">
+                        <span className="text-[10px] font-black uppercase tracking-widest">Propina</span>
+                        <span className="font-bold text-amber-600">+${paidOrderSnapshot.tip.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-zinc-200 dark:border-zinc-700 pt-1.5">
+                      <span className="text-[10px] font-black uppercase tracking-widest">Total</span>
+                      <span className="font-black text-emerald-600">${(paidOrderSnapshot.subtotal + paidOrderSnapshot.tip).toFixed(2)}</span>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => window.print()}
+                    className="w-full h-11 rounded-2xl bg-zinc-900 hover:bg-zinc-800 text-white font-black text-[11px] uppercase tracking-widest gap-2"
+                  >
+                    <Receipt className="w-4 h-4" /> Imprimir ticket
+                  </Button>
+                </>
+              )}
+              <Button variant="ghost" onClick={() => { setPaidSuccess(false); setPayDialogOpen(false); setPaidOrderSnapshot(null); }}
+                className="w-full h-9 rounded-2xl font-black text-[10px] uppercase text-zinc-400">
+                Cerrar
+              </Button>
             </div>
           ) : (
             <div className="space-y-4 py-4">
@@ -573,6 +621,45 @@ export default function CashierPage() {
                     {m}
                   </button>
                 ))}
+              </div>
+
+              {/* Tip selector */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Propina</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {([0, 10, 15, 20] as const).map(pct => (
+                    <button key={pct} type="button" onClick={() => { setTipPercent(pct); setCustomTip(''); }}
+                      className={cn('h-9 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all',
+                        tipPercent === (pct as number) ? 'bg-amber-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-amber-50')}>
+                      {pct === 0 ? 'Sin' : `${pct}%`}
+                    </button>
+                  ))}
+                </div>
+                <button type="button" onClick={() => setTipPercent('custom')}
+                  className={cn('w-full h-9 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all',
+                    tipPercent === 'custom' ? 'bg-amber-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-amber-50')}>
+                  Personalizada
+                </button>
+                {tipPercent === 'custom' && (
+                  <Input type="number" min="0" value={customTip} onChange={e => setCustomTip(e.target.value)}
+                    placeholder="Monto de propina" className="h-10 rounded-xl border-none bg-zinc-50 dark:bg-zinc-800 font-bold text-sm" />
+                )}
+              </div>
+
+              {/* Totals breakdown */}
+              <div className="rounded-2xl bg-zinc-50 dark:bg-zinc-800 px-4 py-3 space-y-1.5">
+                <div className="flex justify-between text-zinc-500">
+                  <span className="text-[10px] font-black uppercase tracking-widest">Subtotal</span>
+                  <span className="font-bold text-sm">${paySubtotal.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-zinc-500">
+                  <span className="text-[10px] font-black uppercase tracking-widest">Propina</span>
+                  <span className="font-bold text-sm text-amber-600">+${tipAmount.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between border-t border-zinc-200 dark:border-zinc-700 pt-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-widest">Total</span>
+                  <span className="font-black text-lg text-emerald-600">${payTotal.toFixed(2)}</span>
+                </div>
               </div>
 
               {payMethod === 'efectivo' && (
@@ -591,7 +678,7 @@ export default function CashierPage() {
                 </>
               )}
 
-              <Button onClick={handlePay} disabled={paying || (payMethod === 'efectivo' && change < 0)}
+              <Button onClick={handlePay} disabled={paying || (payMethod === 'efectivo' && !!cashReceived && change < 0)}
                 className="w-full h-12 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-sm uppercase tracking-widest disabled:opacity-40">
                 {paying ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Confirmar cobro'}
               </Button>
@@ -625,6 +712,59 @@ export default function CashierPage() {
       </Dialog>
 
     </SidebarProvider>
+
+    {/* Hidden print ticket — only visible when window.print() is called */}
+    {paidOrderSnapshot && (
+      <div className="hidden print:block fixed inset-0 bg-white text-black p-8 z-[9999]" style={{ fontFamily: 'monospace' }}>
+        <div style={{ maxWidth: 320, margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: 16 }}>
+            <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: 2 }}>TAQUERÍA POS</div>
+            <div style={{ fontSize: 11, marginTop: 4 }}>Mesa {paidOrderSnapshot.tableId}</div>
+            <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>
+              {new Date(paidOrderSnapshot.paidAt).toLocaleString('es-MX')}
+            </div>
+          </div>
+          <hr style={{ borderTop: '1px dashed #999', margin: '8px 0' }} />
+          <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left', paddingBottom: 4 }}>Producto</th>
+                <th style={{ textAlign: 'center' }}>Cant</th>
+                <th style={{ textAlign: 'right' }}>Precio</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paidOrderSnapshot.items.map(item => (
+                <tr key={item.id}>
+                  <td style={{ paddingBottom: 2 }}>{item.product_name}</td>
+                  <td style={{ textAlign: 'center' }}>{item.quantity}</td>
+                  <td style={{ textAlign: 'right' }}>${(Number(item.price) * item.quantity).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <hr style={{ borderTop: '1px dashed #999', margin: '8px 0' }} />
+          <div style={{ fontSize: 11 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Subtotal</span><span>${paidOrderSnapshot.subtotal.toFixed(2)}</span>
+            </div>
+            {paidOrderSnapshot.tip > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Propina</span><span>+${paidOrderSnapshot.tip.toFixed(2)}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: 14, marginTop: 4 }}>
+              <span>TOTAL</span><span>${(paidOrderSnapshot.subtotal + paidOrderSnapshot.tip).toFixed(2)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, color: '#555' }}>
+              <span>Método</span><span style={{ textTransform: 'capitalize' }}>{paidOrderSnapshot.method}</span>
+            </div>
+          </div>
+          <hr style={{ borderTop: '1px dashed #999', margin: '8px 0' }} />
+          <div style={{ textAlign: 'center', fontSize: 10, color: '#888', marginTop: 8 }}>¡Gracias por su visita!</div>
+        </div>
+      </div>
+    )}
     </CashSessionGate>
   );
 }

@@ -1,14 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Button } from "@/components/ui/button";
 import { Delete, UserCheck, Loader2, AlertCircle, ChefHat } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

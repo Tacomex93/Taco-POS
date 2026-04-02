@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   ChefHat, Plus, Flame, CheckCircle2,
   Loader2, Users, X, Minus, ShoppingBag, RefreshCw,
-  UtensilsCrossed, Wifi, WifiOff
+  UtensilsCrossed, Wifi, WifiOff, Search, ClipboardList
 } from "lucide-react";
 import { UserNav } from "@/components/UserNav";
 import { useRouter } from "next/navigation";
@@ -56,11 +56,12 @@ export default function WaiterPage() {
 
   // Modal state
   const [selectedTable, setSelectedTable] = useState<TableView | null>(null);
-  const [modalMode, setModalMode] = useState<'view' | 'new-order'>('view');
+  const [modalMode, setModalMode] = useState<'view' | 'new-order' | 'summary'>('view');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [diners, setDiners] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [productSearch, setProductSearch] = useState('');
 
   // ── Notifications ─────────────────────────────────────────────────────────
   const { notifications, unreadCount, markAllRead, markRead, clear } = useNotifications({ role: 'mesero' });
@@ -131,7 +132,7 @@ export default function WaiterPage() {
     channelName: 'mesero-orders',
     onchange: () => fetchTables(),
     onRefresh: fetchTables,
-    pollInterval: 20_000,
+    pollInterval: 5_000,
   });
 
   // Sync online indicator with realtime connection
@@ -208,6 +209,7 @@ export default function WaiterPage() {
     setCart([]);
     setDiners(table.diners || 1);
     setActiveCategory('all');
+    setProductSearch('');
   };
 
   const closeModal = () => { setSelectedTable(null); setCart([]); };
@@ -216,7 +218,8 @@ export default function WaiterPage() {
   const occupied = tables.filter(t => t.status !== 'available').length;
   const totalDiners = tables.reduce((s, t) => s + t.diners, 0);
   const categories = ['all', ...Array.from(new Set(products.map(p => p.category)))];
-  const filteredProducts = activeCategory === 'all' ? products : products.filter(p => p.category === activeCategory);
+  const filteredProducts = (activeCategory === 'all' ? products : products.filter(p => p.category === activeCategory))
+    .filter(p => productSearch === '' || p.name.toLowerCase().includes(productSearch.toLowerCase()));
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -443,17 +446,29 @@ export default function WaiterPage() {
                   </div>
                 </div>
 
-                {/* Category tabs */}
-                <div className="px-6 py-3 flex gap-2 overflow-x-auto border-b border-zinc-100 dark:border-zinc-800 scrollbar-none">
-                  {categories.map(cat => (
-                    <button key={cat} onClick={() => setActiveCategory(cat)}
-                      className={cn(
-                        "shrink-0 h-7 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                        activeCategory === cat ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-900" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500"
-                      )}>
-                      {cat === 'all' ? 'Todo' : cat}
-                    </button>
-                  ))}
+                {/* Search + Category tabs */}
+                <div className="px-4 pt-3 pb-2 border-b border-zinc-100 dark:border-zinc-800 space-y-2">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+                    <input
+                      type="text"
+                      value={productSearch}
+                      onChange={e => setProductSearch(e.target.value)}
+                      placeholder="Buscar producto..."
+                      className="w-full h-9 pl-9 pr-3 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-sm font-semibold text-zinc-900 dark:text-white placeholder:text-zinc-400 border-none outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto scrollbar-none">
+                    {categories.map(cat => (
+                      <button key={cat} onClick={() => setActiveCategory(cat)}
+                        className={cn(
+                          "shrink-0 h-7 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                          activeCategory === cat ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-900" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500"
+                        )}>
+                        {cat === 'all' ? 'Todo' : cat}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Products */}
@@ -487,13 +502,24 @@ export default function WaiterPage() {
                 {/* Cart summary + submit */}
                 {cart.length > 0 && (
                   <div className="border-t border-zinc-100 dark:border-zinc-800 p-4 space-y-3">
-                    <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
+                    {/* Cart items with notes */}
+                    <div className="space-y-2 max-h-36 overflow-y-auto">
                       {cart.map(item => (
-                        <div key={item.product.id} className="flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg px-2 py-1">
-                          <span className="text-[10px] font-black">{item.qty}× {item.product.name}</span>
-                          <button onClick={() => removeFromCart(item.product.id)} className="text-zinc-400 hover:text-red-500">
-                            <X className="w-3 h-3" />
-                          </button>
+                        <div key={item.product.id} className="bg-zinc-50 dark:bg-zinc-800 rounded-xl p-2 space-y-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black flex-1 truncate">{item.qty}× {item.product.name}</span>
+                            <span className="text-[10px] font-bold text-orange-600">${(item.product.price * item.qty).toFixed(2)}</span>
+                            <button onClick={() => removeFromCart(item.product.id)} className="text-zinc-400 hover:text-red-500 shrink-0">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            value={item.notes}
+                            onChange={e => setCart(prev => prev.map(i => i.product.id === item.product.id ? { ...i, notes: e.target.value } : i))}
+                            placeholder="Nota (ej: sin cebolla)"
+                            className="w-full h-7 px-2 rounded-lg bg-white dark:bg-zinc-700 text-[10px] font-semibold text-zinc-700 dark:text-zinc-200 placeholder:text-zinc-400 border border-zinc-200 dark:border-zinc-600 outline-none focus:border-orange-400"
+                          />
                         </div>
                       ))}
                     </div>
@@ -502,14 +528,45 @@ export default function WaiterPage() {
                         <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">{cartCount} items</p>
                         <p className="text-xl font-black text-zinc-900 dark:text-white">${cartTotal.toLocaleString()}</p>
                       </div>
-                      <Button onClick={submitOrder} disabled={submitting}
+                      <Button onClick={() => setModalMode('summary')}
                         className="h-12 px-6 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-black uppercase tracking-widest text-xs shadow-lg shadow-orange-500/30">
-                        {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShoppingBag className="w-4 h-4 mr-2" />Enviar a Cocina</>}
+                        <ClipboardList className="w-4 h-4 mr-2" />Revisar orden
                       </Button>
                     </div>
                   </div>
                 )}
               </>
+            )}
+
+            {/* Summary mode */}
+            {modalMode === 'summary' && (
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                <div className="space-y-2">
+                  {cart.map(item => (
+                    <div key={item.product.id} className="flex items-start justify-between gap-3 bg-zinc-50 dark:bg-zinc-800 rounded-xl p-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-black text-zinc-900 dark:text-white">{item.qty}× {item.product.name}</p>
+                        {item.notes && <p className="text-[10px] text-zinc-500 italic mt-0.5">&ldquo;{item.notes}&rdquo;</p>}
+                      </div>
+                      <span className="font-black text-sm text-orange-600 shrink-0">${(item.product.price * item.qty).toFixed(2)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-between items-center border-t border-zinc-100 dark:border-zinc-800 pt-3">
+                  <span className="text-xs font-black text-zinc-400 uppercase tracking-widest">{cartCount} items · {diners} comensales</span>
+                  <span className="text-2xl font-black text-zinc-900 dark:text-white">${cartTotal.toFixed(2)}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="ghost" onClick={() => setModalMode('new-order')}
+                    className="h-11 rounded-xl font-black text-xs uppercase text-zinc-500">
+                    ← Editar
+                  </Button>
+                  <Button onClick={submitOrder} disabled={submitting}
+                    className="h-11 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-black uppercase tracking-widest text-xs shadow-lg shadow-orange-500/30">
+                    {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <><ShoppingBag className="w-4 h-4 mr-1.5" />Enviar</>}
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         </div>

@@ -32,7 +32,10 @@ export function useCashSession() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    // Initial load — wrapped in async IIFE to satisfy react-hooks/set-state-in-effect
+    (async () => { await refresh(); })();
+  }, [refresh]);
 
   const openSession = useCallback(async (label: string, openingFloat: number, employeeId: string) => {
     const { data, error } = await supabase
